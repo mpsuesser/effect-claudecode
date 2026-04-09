@@ -4,6 +4,8 @@ Write [Claude Code](https://code.claude.com) plugins — hooks, skills, subagent
 
 `effect-claudecode` wraps Claude Code's plugin primitives (stdio hook processes, `.claude/settings.json`, `plugin.json` manifests, frontmatter files, `.mcp.json`) in Effect idioms, so plugin authors get typed input/output schemas for all 26 hook events, Effect-native handlers with injected context, decision constructors per event, and correct stdio/exit-code semantics for free — no more hand-parsing snake_case JSON or gluing `process.exit` calls together.
 
+The examples below keep `Effect.run*` at the runtime boundary and keep the actual hook logic inside `Effect.gen` blocks with `yield*`, injected services, and Effect-native logging.
+
 ## Features
 
 - **`Hook.runMain(hook)`** — drop-in runner that reads stdin, decodes the schema, builds a `HookContext`, runs your handler, encodes the output, and exits with the right code
@@ -35,20 +37,17 @@ bun add effect-claudecode effect@4.0.0-beta.43 @effect/platform-node-shared@4.0.
 
 ```ts
 import * as Effect from 'effect/Effect';
+import * as P from 'effect/Predicate';
 import { Hook } from 'effect-claudecode';
 
 const hook = Hook.PreToolUse.define({
-	handler: (input) => {
-		const command =
-			typeof input.tool_input['command'] === 'string'
-				? input.tool_input['command']
-				: '';
-		return Effect.succeed(
-			/rm\s+-rf\s+\//.test(command)
+	handler: (input) =>
+		Effect.gen(function* () {
+			const command = input.tool_input['command'];
+			return /rm\s+-rf\s+\//.test(P.isString(command) ? command : '')
 				? Hook.PreToolUse.deny('destructive command rejected')
-				: Hook.PreToolUse.allow()
-		);
-	}
+				: Hook.PreToolUse.allow();
+		})
 });
 
 Hook.runMain(hook);
@@ -111,11 +110,14 @@ const plugin = Plugin.define({
 	}
 });
 
-Effect.runPromise(
-	Plugin.write(plugin, './dist-plugin').pipe(
-		Effect.provide(Layer.merge(NodeFileSystem.layer, NodePath.layer))
-	)
+const PlatformLive = Layer.merge(NodeFileSystem.layer, NodePath.layer);
+
+const program = Plugin.write(plugin, './dist-plugin').pipe(
+	Effect.tap(() => Effect.logInfo('plugin written to ./dist-plugin')),
+	Effect.provide(PlatformLive)
 );
+
+Effect.runPromise(program);
 ```
 
 ## Hooks
@@ -125,13 +127,13 @@ Effect.runPromise(
 `Hook.runMain(hook)` is the primary entry point. It is called at the top level of a hook script and:
 
 1. Collects all of stdin via `Stdio.stdin`
-2. `JSON.parse`s the payload, decodes it against the event's `Input` schema
+2. Decodes the stdin JSON payload against the event's `Input` schema
 3. Builds a `HookContext.Service` layer from the decoded envelope
 4. Runs the handler with the context layer provided
 5. Encodes the returned `Output` value back to JSON and writes it to `Stdio.stdout`
 6. Exits the process with the right code (`0` success, `1` non-blocking error, `2` blocking decode error, `130` SIGINT)
 
-The runner internally provides `NodeStdio.layer` from `@effect/platform-node-shared` and installs a custom `Runtime.Teardown` for exit-code mapping. You never call `process.exit` or `JSON.parse` yourself.
+The runner internally provides `NodeStdio.layer` from `@effect/platform-node-shared` and installs a custom `Runtime.Teardown` for exit-code mapping. You never call `process.exit`, manually decode stdin, or hand-roll stdout/exit handling yourself.
 
 ### Event definition
 
@@ -139,6 +141,7 @@ Each of the 26 event namespaces exposes the same shape. Using `PreToolUse` as th
 
 ```ts
 import * as Effect from 'effect/Effect';
+import * as Option from 'effect/Option';
 import { Hook } from 'effect-claudecode';
 
 // Hook.PreToolUse.Input — Schema.Class with envelope + event-specific fields:
@@ -157,11 +160,11 @@ import { Hook } from 'effect-claudecode';
 
 const hook = Hook.PreToolUse.define({
 	handler: (input) =>
-		Effect.succeed(
-			input.tool_name === 'Bash'
+		Effect.gen(function* () {
+			return input.tool_name === 'Bash'
 				? Hook.PreToolUse.deny('bash disabled')
-				: Hook.PreToolUse.allow()
-		)
+				: Hook.PreToolUse.allow();
+		})
 });
 
 Hook.runMain(hook);
@@ -183,10 +186,10 @@ const hook = Hook.SessionStart.define({
 			const sessionId = yield* Hook.sessionId;
 			const cwd = yield* Hook.cwd;
 			const transcriptPath = yield* Hook.transcriptPath;
-			const mode = yield* Hook.permissionMode; // string | undefined
+			const mode = yield* Hook.permissionMode; // Option.Option<string>
 			const event = yield* Hook.hookEventName;
 			return Hook.SessionStart.addContext(
-				`Session ${sessionId} started in ${cwd} (${event}, mode=${mode ?? 'default'})`
+				`Session ${sessionId} started in ${cwd} (${event}, mode=${Option.getOrElse(mode, () => 'default')})`
 			);
 		})
 });
@@ -301,6 +304,7 @@ Fails with `TranscriptReadError { path, cause }` on I/O failure.
 ```ts
 import * as NodeFileSystem from '@effect/platform-node-shared/NodeFileSystem';
 import * as NodePath from '@effect/platform-node-shared/NodePath';
+import * as Console from 'effect/Console';
 import * as Effect from 'effect/Effect';
 import * as Layer from 'effect/Layer';
 
@@ -308,8 +312,8 @@ import { Settings } from 'effect-claudecode';
 
 const program = Effect.gen(function* () {
 	const settings = yield* Settings.load(process.cwd());
-	console.log(settings.model); // e.g. "sonnet"
-	console.log(settings.hooks); // HooksSection
+	yield* Console.log(settings.model); // e.g. "sonnet"
+	yield* Console.log(settings.hooks); // HooksSection
 });
 
 Effect.runPromise(
@@ -380,11 +384,14 @@ import * as Layer from 'effect/Layer';
 
 import { Plugin } from 'effect-claudecode';
 
-Effect.runPromise(
-	Plugin.write(plugin, './dist-plugin').pipe(
-		Effect.provide(Layer.merge(NodeFileSystem.layer, NodePath.layer))
-	)
+const PlatformLive = Layer.merge(NodeFileSystem.layer, NodePath.layer);
+
+const program = Plugin.write(plugin, './dist-plugin').pipe(
+	Effect.tap(() => Effect.logInfo('plugin written to ./dist-plugin')),
+	Effect.provide(PlatformLive)
 );
+
+Effect.runPromise(program);
 ```
 
 Directory layout produced:
@@ -412,6 +419,7 @@ Split YAML frontmatter from a markdown body and decode it:
 
 ```ts
 import * as NodeFileSystem from '@effect/platform-node-shared/NodeFileSystem';
+import * as Console from 'effect/Console';
 import * as Effect from 'effect/Effect';
 import * as Schema from 'effect/Schema';
 
@@ -425,7 +433,7 @@ const program = Effect.gen(function* () {
 		parsed.frontmatter
 	);
 	// skill: { name: string, description: string, ... }
-	console.log(skill.name);
+	yield* Console.log(skill.name);
 });
 
 Effect.runPromise(program.pipe(Effect.provide(NodeFileSystem.layer)));
@@ -450,6 +458,7 @@ For in-memory sources use `Frontmatter.parse(source, path)` — same return type
 
 ```ts
 import * as NodeFileSystem from '@effect/platform-node-shared/NodeFileSystem';
+import * as Console from 'effect/Console';
 import * as Effect from 'effect/Effect';
 
 import { Mcp } from 'effect-claudecode';
@@ -457,9 +466,9 @@ import { Mcp } from 'effect-claudecode';
 const program = Effect.gen(function* () {
 	const file = yield* Mcp.loadJson('./.mcp.json');
 	// file: McpJsonFile { mcpServers: Record<string, McpServerConfig> }
-	for (const [name, server] of Object.entries(file.mcpServers)) {
-		console.log(`${name}: ${server.type}`);
-	}
+	yield* Effect.forEach(Object.entries(file.mcpServers), ([name, server]) =>
+		Console.log(`${name}: ${server.type}`)
+	);
 });
 
 Effect.runPromise(program.pipe(Effect.provide(NodeFileSystem.layer)));
@@ -535,6 +544,7 @@ Handler-authored *blocks* (e.g. `Hook.UserPromptSubmit.block('reason')`) travel 
 ```ts
 import { describe, expect, it } from '@effect/vitest';
 import * as Effect from 'effect/Effect';
+import * as P from 'effect/Predicate';
 
 import { Hook, Testing } from 'effect-claudecode';
 
@@ -542,17 +552,15 @@ describe('pre-bash-denylist', () => {
 	it.effect('denies rm -rf /', () =>
 		Effect.gen(function* () {
 			const hook = Hook.PreToolUse.define({
-				handler: (input) => {
-					const command =
-						typeof input.tool_input['command'] === 'string'
-							? input.tool_input['command']
-							: '';
-					return Effect.succeed(
-						/rm\s+-rf\s+\//.test(command)
+				handler: (input) =>
+					Effect.gen(function* () {
+						const command = input.tool_input['command'];
+						return /rm\s+-rf\s+\//.test(
+							P.isString(command) ? command : ''
+						)
 							? Hook.PreToolUse.deny('destructive')
-							: Hook.PreToolUse.allow()
-					);
-				}
+							: Hook.PreToolUse.allow();
+					})
 			});
 
 			const result = yield* Testing.runHookWithMockStdin(
@@ -662,6 +670,8 @@ Complete runnable examples live in [`examples/`](./examples):
 
 ```sh
 bun install
+bun run build                                           # emit dist/ for publishing
+bun run check                                           # build + test + typecheck
 bun run test                                            # vitest run — all tests
 bun run typecheck                                       # tsc --noEmit
 bunx vitest run test/Hook/Events/PreToolUse.test.ts     # single file
