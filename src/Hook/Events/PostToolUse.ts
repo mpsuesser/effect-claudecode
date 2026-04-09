@@ -11,9 +11,11 @@
 import * as Effect from 'effect/Effect';
 import * as Schema from 'effect/Schema';
 
+import { HookToolDecodeError } from '../../Errors.ts';
 import type { HookContext } from '../Context.ts';
 import { envelopeFields } from '../Envelope.ts';
 import type { HookDefinition } from '../Runner.ts';
+import * as Tool from '../Tool.ts';
 
 // ---------------------------------------------------------------------------
 // Input
@@ -121,3 +123,39 @@ export const define = (config: {
 	outputSchema: Output,
 	handler: config.handler
 });
+
+/**
+ * Build a PostToolUse hook that only handles a specific supported tool.
+ * Non-matching tool invocations default to `passthrough()`.
+ *
+ * @category Constructors
+ * @since 0.1.0
+ */
+export const onTool = <T extends Tool.SupportedToolName>(config: {
+	readonly toolName: T;
+	readonly handler: (
+		input: Tool.DecodedPostToolUse<T>
+	) => Effect.Effect<Output, unknown, HookContext.Service>;
+	readonly onMismatch?: (
+		input: Input
+	) => Effect.Effect<Output, unknown, HookContext.Service>;
+	readonly onDecodeError?: (
+		error: HookToolDecodeError,
+		input: Input
+	) => Effect.Effect<Output, unknown, HookContext.Service>;
+}): HookDefinition<Input, Output> =>
+	define({
+		handler: (input): Effect.Effect<Output, unknown, HookContext.Service> => {
+			if (input.tool_name !== config.toolName) {
+				return config.onMismatch?.(input) ?? Effect.succeed(passthrough());
+			}
+			return Tool.decodePostToolUse(config.toolName, input).pipe(
+				Effect.flatMap(config.handler),
+				Effect.catch((error) =>
+					error instanceof HookToolDecodeError
+						? config.onDecodeError?.(error, input) ?? Effect.fail(error)
+						: Effect.fail(error)
+				)
+			);
+		}
+	});

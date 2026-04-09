@@ -86,6 +86,22 @@ export class HookStdoutWriteError extends Schema.TaggedErrorClass<HookStdoutWrit
 	cause: Schema.Defect
 }) {}
 
+/**
+ * Raised when decoding a known tool payload from `tool_input` or
+ * `tool_response` fails.
+ *
+ * @category Hook errors
+ * @since 0.1.0
+ */
+export class HookToolDecodeError extends Schema.TaggedErrorClass<HookToolDecodeError>(
+	'effect-claudecode/HookToolDecodeError'
+)('HookToolDecodeError', {
+	event: Schema.Literals(['PreToolUse', 'PostToolUse']),
+	toolName: Schema.String,
+	payload: Schema.Literals(['tool_input', 'tool_response']),
+	cause: Schema.Defect
+}) {}
+
 // ---------------------------------------------------------------------------
 // Transcript errors
 // ---------------------------------------------------------------------------
