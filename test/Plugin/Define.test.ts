@@ -20,6 +20,7 @@ import * as PlatformError from 'effect/PlatformError';
 
 import { PluginWriteError } from '../../src/Errors.ts';
 import * as Define from '../../src/Plugin/Define.ts';
+import { McpJsonFile } from '../../src/Mcp/JsonFile.ts';
 import { PluginManifest } from '../../src/Plugin/Manifest.ts';
 
 // ---------------------------------------------------------------------------
@@ -110,10 +111,45 @@ describe('Plugin.define', () => {
 		const def = Define.define({
 			manifest: { name: 'p' },
 			hooksConfig: { PostToolUse: [] },
-			mcpConfig: { mcpServers: { fs: { command: 'mcp-fs' } } }
+			mcpConfig: {
+				mcpServers: {
+					fs: { type: 'stdio', command: 'mcp-fs' }
+				}
+			}
 		});
 		expect(Option.isSome(def.hooksConfig)).toBe(true);
 		expect(Option.isSome(def.mcpConfig)).toBe(true);
+		if (Option.isSome(def.mcpConfig)) {
+			expect(def.mcpConfig.value).toBeInstanceOf(McpJsonFile);
+		}
+	});
+
+	it('builds typed component entries with helper constructors', () => {
+		const review = Define.command({
+			name: 'review',
+			description: 'Review staged changes',
+			body: '# Review\n'
+		});
+		const reviewer = Define.agent({
+			name: 'reviewer',
+			description: 'Review code',
+			body: '# Reviewer\n'
+		});
+		const greet = Define.skill({
+			name: 'greet',
+			description: 'Say hello',
+			body: '# Greet\n'
+		});
+		const terse = Define.outputStyle({
+			name: 'terse',
+			description: 'Keep responses compact',
+			body: '# Terse\n'
+		});
+
+		expect(review.frontmatter.description).toBe('Review staged changes');
+		expect(reviewer.frontmatter.name).toBe('reviewer');
+		expect(greet.frontmatter.name).toBe('greet');
+		expect(terse.frontmatter.name).toBe('terse');
 	});
 });
 
@@ -151,18 +187,29 @@ describe('Plugin.write — directory layout', () => {
 			const def = Define.define({
 				manifest: { name: 'p' },
 				commands: [
-					{ name: 'greet', content: '# /greet\n\nSay hi.\n' },
-					{ name: 'ship', content: '# /ship\n\nShip it.\n' }
+					Define.command({
+						name: 'greet',
+						description: 'Say hi',
+						body: '# /greet\n\nSay hi.\n'
+					}),
+					Define.command({
+						name: 'ship',
+						description: 'Ship it',
+						body: '# /ship\n\nShip it.\n'
+					})
 				]
 			});
 			yield* Define.write(def, '/dest').pipe(Effect.provide(capture.layer));
 
 			expect(capture.dirs.has('/dest/commands')).toBe(true);
-			expect(capture.writes.get('/dest/commands/greet.md')).toBe(
-				'# /greet\n\nSay hi.\n'
+			expect(capture.writes.get('/dest/commands/greet.md')).toContain(
+				'description: Say hi'
 			);
-			expect(capture.writes.get('/dest/commands/ship.md')).toBe(
-				'# /ship\n\nShip it.\n'
+			expect(capture.writes.get('/dest/commands/greet.md')).toContain(
+				'# /greet'
+			);
+			expect(capture.writes.get('/dest/commands/ship.md')).toContain(
+				'description: Ship it'
 			);
 		})
 	);
@@ -173,14 +220,21 @@ describe('Plugin.write — directory layout', () => {
 			const def = Define.define({
 				manifest: { name: 'p' },
 				agents: [
-					{ name: 'reviewer', content: '# reviewer\n' }
+					Define.agent({
+						name: 'reviewer',
+						description: 'Review code',
+						body: '# reviewer\n'
+					})
 				]
 			});
 			yield* Define.write(def, '/dest').pipe(Effect.provide(capture.layer));
 
 			expect(capture.dirs.has('/dest/agents')).toBe(true);
-			expect(capture.writes.get('/dest/agents/reviewer.md')).toBe(
-				'# reviewer\n'
+			expect(capture.writes.get('/dest/agents/reviewer.md')).toContain(
+				'name: reviewer'
+			);
+			expect(capture.writes.get('/dest/agents/reviewer.md')).toContain(
+				'# reviewer'
 			);
 		})
 	);
@@ -191,8 +245,16 @@ describe('Plugin.write — directory layout', () => {
 			const def = Define.define({
 				manifest: { name: 'p' },
 				skills: [
-					{ name: 'pdf-processor', content: '# pdf-processor\n' },
-					{ name: 'code-reviewer', content: '# code-reviewer\n' }
+					Define.skill({
+						name: 'pdf-processor',
+						description: 'Process PDFs',
+						body: '# pdf-processor\n'
+					}),
+					Define.skill({
+						name: 'code-reviewer',
+						description: 'Review code',
+						body: '# code-reviewer\n'
+					})
 				]
 			});
 			yield* Define.write(def, '/dest').pipe(Effect.provide(capture.layer));
@@ -202,10 +264,10 @@ describe('Plugin.write — directory layout', () => {
 			expect(capture.dirs.has('/dest/skills/code-reviewer')).toBe(true);
 			expect(
 				capture.writes.get('/dest/skills/pdf-processor/SKILL.md')
-			).toBe('# pdf-processor\n');
+			).toContain('name: pdf-processor');
 			expect(
 				capture.writes.get('/dest/skills/code-reviewer/SKILL.md')
-			).toBe('# code-reviewer\n');
+			).toContain('name: code-reviewer');
 		})
 	);
 
@@ -214,13 +276,19 @@ describe('Plugin.write — directory layout', () => {
 			const capture = makeCapture();
 			const def = Define.define({
 				manifest: { name: 'p' },
-				outputStyles: [{ name: 'terse', content: '# terse\n' }]
+				outputStyles: [
+					Define.outputStyle({
+						name: 'terse',
+						description: 'Keep it brief',
+						body: '# terse\n'
+					})
+				]
 			});
 			yield* Define.write(def, '/dest').pipe(Effect.provide(capture.layer));
 
 			expect(capture.dirs.has('/dest/output-styles')).toBe(true);
-			expect(capture.writes.get('/dest/output-styles/terse.md')).toBe(
-				'# terse\n'
+			expect(capture.writes.get('/dest/output-styles/terse.md')).toContain(
+				'name: terse'
 			);
 		})
 	);
@@ -231,14 +299,12 @@ describe('Plugin.write — directory layout', () => {
 			const def = Define.define({
 				manifest: { name: 'p' },
 				hooksConfig: {
-					hooks: {
-						PostToolUse: [
-							{
-								matcher: 'Write',
-								hooks: [{ type: 'command', command: './fmt.sh' }]
-							}
-						]
-					}
+					PostToolUse: [
+						{
+							matcher: 'Write',
+							hooks: [{ type: 'command', command: './fmt.sh' }]
+						}
+					]
 				}
 			});
 			yield* Define.write(def, '/dest').pipe(Effect.provide(capture.layer));
@@ -258,7 +324,7 @@ describe('Plugin.write — directory layout', () => {
 				manifest: { name: 'p' },
 				mcpConfig: {
 					mcpServers: {
-						filesystem: { command: 'mcp-fs' }
+						filesystem: { type: 'stdio', command: 'mcp-fs' }
 					}
 				}
 			});
@@ -319,7 +385,13 @@ describe('Plugin.write — errors', () => {
 			});
 			const def = Define.define({
 				manifest: { name: 'p' },
-				commands: [{ name: 'broken', content: 'body\n' }]
+				commands: [
+					Define.command({
+						name: 'broken',
+						description: 'Broken command',
+						body: 'body\n'
+					})
+				]
 			});
 
 			const raised = yield* Effect.flip(

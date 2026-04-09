@@ -41,9 +41,24 @@ export {
 // Builder + writer
 // ---------------------------------------------------------------------------
 
-export { define, write } from './Plugin/Define.ts';
+export {
+	agent,
+	command,
+	define,
+	outputStyle,
+	skill,
+	write
+} from './Plugin/Define.ts';
 export type {
+	PluginAgentConfig,
+	PluginAgentEntry,
 	PluginConfig,
+	PluginCommandConfig,
+	PluginCommandEntry,
 	PluginDefinition,
-	PluginFileEntry
+	PluginManifestInput,
+	PluginOutputStyleConfig,
+	PluginOutputStyleEntry,
+	PluginSkillConfig,
+	PluginSkillEntry
 } from './Plugin/Define.ts';

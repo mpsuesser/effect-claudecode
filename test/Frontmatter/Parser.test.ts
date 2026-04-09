@@ -18,6 +18,7 @@ import {
 	FrontmatterReadError
 } from '../../src/Errors.ts';
 import * as Parser from '../../src/Frontmatter/Parser.ts';
+import * as Render from '../../src/Frontmatter/Render.ts';
 
 // ---------------------------------------------------------------------------
 // Test layer builder
@@ -217,4 +218,31 @@ describe('Frontmatter.parseFile', () => {
 			)
 		)
 	);
+});
+
+// ---------------------------------------------------------------------------
+// render — typed authoring helpers
+// ---------------------------------------------------------------------------
+
+describe('Frontmatter.render*', () => {
+	it('renders typed skill frontmatter and markdown body', () => {
+		const markdown = Render.renderSkill(
+			{
+				name: 'greet',
+				description: 'Say hello',
+				'allowed-tools': ['Read']
+			},
+			'# Greet\n\nSay hello.\n'
+		);
+
+		expect(markdown).toContain('---\n');
+		expect(markdown).toContain('name: greet');
+		expect(markdown).toContain('description: Say hello');
+		expect(markdown).toContain('# Greet');
+	});
+
+	it('omits frontmatter delimiters when the command frontmatter is empty', () => {
+		const markdown = Render.renderCommand({}, '# /review\n');
+		expect(markdown).toBe('# /review\n');
+	});
 });

@@ -25,3 +25,7 @@ export class OutputStyleFrontmatter extends Schema.Class<OutputStyleFrontmatter>
 	name: Schema.String,
 	description: Schema.optional(Schema.String)
 }) {}
+
+export type OutputStyleFrontmatterInput = ConstructorParameters<
+	typeof OutputStyleFrontmatter
+>[0];

@@ -75,3 +75,7 @@ export class SkillFrontmatter extends Schema.Class<SkillFrontmatter>(
 	// Inline hooks (same shape as settings.json hooks)
 	hooks: Schema.optional(HooksSection)
 }) {}
+
+export type SkillFrontmatterInput = ConstructorParameters<
+	typeof SkillFrontmatter
+>[0];

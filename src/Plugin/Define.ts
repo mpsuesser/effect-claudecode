@@ -26,29 +26,105 @@ import * as Effect from 'effect/Effect';
 import * as FileSystem from 'effect/FileSystem';
 import * as Option from 'effect/Option';
 import * as Path from 'effect/Path';
+import * as Schema from 'effect/Schema';
 
 import { PluginWriteError } from '../Errors.ts';
+import {
+	type CommandFrontmatterInput,
+	type OutputStyleFrontmatterInput,
+	renderCommand,
+	renderOutputStyle,
+	renderSkill,
+	renderSubagent,
+	type SkillFrontmatterInput,
+	type SubagentFrontmatterInput,
+	CommandFrontmatter,
+	OutputStyleFrontmatter,
+	SkillFrontmatter,
+	SubagentFrontmatter
+} from '../Frontmatter.ts';
+import { McpJsonFile, type McpJsonFileInput } from '../Mcp.ts';
+import { HooksSection } from '../Settings/HooksSection.ts';
 import { PluginManifest } from './Manifest.ts';
+
+type HooksConfig = Schema.Schema.Type<typeof HooksSection>;
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 /**
- * A single component file to be written into the plugin directory.
- * The `name` is used to derive the file name (e.g. `commit` ->
- * `commit.md`); the `content` is the complete file body including
- * any YAML frontmatter.
+ * A typed slash-command entry to be written to `commands/<name>.md`.
  *
  * @category Models
  * @since 0.1.0
  */
-export interface PluginFileEntry {
+export interface PluginCommandEntry {
 	readonly name: string;
-	readonly content: string;
+	readonly frontmatter: CommandFrontmatter;
+	readonly body: string;
 }
 
-type PluginManifestInput = ConstructorParameters<typeof PluginManifest>[0];
+/**
+ * A typed subagent entry to be written to `agents/<name>.md`.
+ *
+ * @category Models
+ * @since 0.1.0
+ */
+export interface PluginAgentEntry {
+	readonly name: string;
+	readonly frontmatter: SubagentFrontmatter;
+	readonly body: string;
+}
+
+/**
+ * A typed skill entry to be written to `skills/<name>/SKILL.md`.
+ *
+ * @category Models
+ * @since 0.1.0
+ */
+export interface PluginSkillEntry {
+	readonly name: string;
+	readonly frontmatter: SkillFrontmatter;
+	readonly body: string;
+}
+
+/**
+ * A typed output-style entry to be written to `output-styles/<name>.md`.
+ *
+ * @category Models
+ * @since 0.1.0
+ */
+export interface PluginOutputStyleEntry {
+	readonly name: string;
+	readonly frontmatter: OutputStyleFrontmatter;
+	readonly body: string;
+}
+
+export type PluginManifestInput = ConstructorParameters<typeof PluginManifest>[0];
+
+export type PluginCommandConfig = CommandFrontmatterInput & {
+	readonly name: string;
+	readonly body: string;
+};
+
+export type PluginAgentConfig = Omit<SubagentFrontmatterInput, 'name'> & {
+	readonly name: string;
+	readonly body: string;
+};
+
+export type PluginSkillConfig = Omit<SkillFrontmatterInput, 'name'> & {
+	readonly name: string;
+	readonly body: string;
+};
+
+export type PluginOutputStyleConfig = Omit<
+	OutputStyleFrontmatterInput,
+	'name'
+> & {
+	readonly name: string;
+	readonly body: string;
+};
 
 /**
  * Config passed to `Plugin.define`. The `manifest` field accepts
@@ -60,12 +136,12 @@ type PluginManifestInput = ConstructorParameters<typeof PluginManifest>[0];
  */
 export interface PluginConfig {
 	readonly manifest: PluginManifest | PluginManifestInput;
-	readonly commands?: ReadonlyArray<PluginFileEntry>;
-	readonly agents?: ReadonlyArray<PluginFileEntry>;
-	readonly skills?: ReadonlyArray<PluginFileEntry>;
-	readonly outputStyles?: ReadonlyArray<PluginFileEntry>;
-	readonly hooksConfig?: Record<string, unknown>;
-	readonly mcpConfig?: Record<string, unknown>;
+	readonly commands?: ReadonlyArray<PluginCommandEntry>;
+	readonly agents?: ReadonlyArray<PluginAgentEntry>;
+	readonly skills?: ReadonlyArray<PluginSkillEntry>;
+	readonly outputStyles?: ReadonlyArray<PluginOutputStyleEntry>;
+	readonly hooksConfig?: HooksConfig;
+	readonly mcpConfig?: McpJsonFile | McpJsonFileInput;
 }
 
 /**
@@ -77,17 +153,130 @@ export interface PluginConfig {
  */
 export interface PluginDefinition {
 	readonly manifest: PluginManifest;
-	readonly commands: ReadonlyArray<PluginFileEntry>;
-	readonly agents: ReadonlyArray<PluginFileEntry>;
-	readonly skills: ReadonlyArray<PluginFileEntry>;
-	readonly outputStyles: ReadonlyArray<PluginFileEntry>;
-	readonly hooksConfig: Option.Option<Record<string, unknown>>;
-	readonly mcpConfig: Option.Option<Record<string, unknown>>;
+	readonly commands: ReadonlyArray<PluginCommandEntry>;
+	readonly agents: ReadonlyArray<PluginAgentEntry>;
+	readonly skills: ReadonlyArray<PluginSkillEntry>;
+	readonly outputStyles: ReadonlyArray<PluginOutputStyleEntry>;
+	readonly hooksConfig: Option.Option<HooksConfig>;
+	readonly mcpConfig: Option.Option<McpJsonFile>;
 }
 
 // ---------------------------------------------------------------------------
 // define
 // ---------------------------------------------------------------------------
+
+/**
+ * Build a typed slash-command entry.
+ *
+ * @category Builders
+ * @since 0.1.0
+ */
+export const command = (config: PluginCommandConfig): PluginCommandEntry => {
+	const { name, body, ...frontmatter } = config;
+	return {
+		name,
+		frontmatter: new CommandFrontmatter(frontmatter),
+		body
+	};
+};
+
+/**
+ * Build a typed subagent entry.
+ *
+ * @category Builders
+ * @since 0.1.0
+ */
+export const agent = (config: PluginAgentConfig): PluginAgentEntry => {
+	const { name, body, ...frontmatter } = config;
+	return {
+		name,
+		frontmatter: new SubagentFrontmatter({ name, ...frontmatter }),
+		body
+	};
+};
+
+/**
+ * Build a typed skill entry.
+ *
+ * @category Builders
+ * @since 0.1.0
+ */
+export const skill = (config: PluginSkillConfig): PluginSkillEntry => {
+	const { name, body, ...frontmatter } = config;
+	return {
+		name,
+		frontmatter: new SkillFrontmatter({ name, ...frontmatter }),
+		body
+	};
+};
+
+/**
+ * Build a typed output-style entry.
+ *
+ * @category Builders
+ * @since 0.1.0
+ */
+export const outputStyle = (
+	config: PluginOutputStyleConfig
+): PluginOutputStyleEntry => {
+	const { name, body, ...frontmatter } = config;
+	return {
+		name,
+		frontmatter: new OutputStyleFrontmatter({ name, ...frontmatter }),
+		body
+	};
+};
+
+const normalizeHooksConfig = (
+	hooksConfig: HooksConfig | undefined
+): Option.Option<HooksConfig> =>
+	hooksConfig === undefined
+		? Option.none()
+		: Option.some(Schema.decodeUnknownSync(HooksSection)(hooksConfig));
+
+const normalizeMcpConfig = (
+	mcpConfig: McpJsonFile | McpJsonFileInput | undefined
+): Option.Option<McpJsonFile> =>
+	mcpConfig === undefined
+		? Option.none()
+		: Option.some(
+				mcpConfig instanceof McpJsonFile
+					? mcpConfig
+					: Schema.decodeUnknownSync(McpJsonFile)(mcpConfig)
+		  );
+
+const validateNamedFrontmatter = (
+	entryName: string,
+	frontmatterName: string,
+	kind: string
+): void => {
+	if (entryName !== frontmatterName) {
+		throw new Error(
+			`${kind} entry name "${entryName}" must match frontmatter name "${frontmatterName}"`
+		);
+	}
+};
+
+const normalizeAgentEntry = (entry: PluginAgentEntry): PluginAgentEntry => {
+	validateNamedFrontmatter(entry.name, entry.frontmatter.name, 'agent');
+	return entry;
+};
+
+const normalizeSkillEntry = (entry: PluginSkillEntry): PluginSkillEntry => {
+	validateNamedFrontmatter(entry.name, entry.frontmatter.name, 'skill');
+	return entry;
+};
+
+const normalizeOutputStyleEntry = (
+	entry: PluginOutputStyleEntry
+): PluginOutputStyleEntry => {
+	validateNamedFrontmatter(
+		entry.name,
+		entry.frontmatter.name,
+		'output style'
+	);
+	return entry;
+};
 
 /**
  * Build a `PluginDefinition` from a plain config object. If
@@ -105,7 +294,11 @@ export interface PluginDefinition {
  * const def = Plugin.define({
  *   manifest: { name: 'my-plugin', version: '0.1.0' },
  *   commands: [
- *     { name: 'greet', content: '# /greet\n\nSay hi.\n' }
+ *     Plugin.command({
+ *       name: 'greet',
+ *       description: 'Say hi',
+ *       body: '# /greet\n\nSay hi.\n'
+ *     })
  *   ]
  * })
  * ```
@@ -116,17 +309,11 @@ export const define = (config: PluginConfig): PluginDefinition => ({
 			? config.manifest
 			: new PluginManifest(config.manifest),
 	commands: config.commands ?? [],
-	agents: config.agents ?? [],
-	skills: config.skills ?? [],
-	outputStyles: config.outputStyles ?? [],
-	hooksConfig:
-		config.hooksConfig === undefined
-			? Option.none()
-			: Option.some(config.hooksConfig),
-	mcpConfig:
-		config.mcpConfig === undefined
-			? Option.none()
-			: Option.some(config.mcpConfig)
+	agents: (config.agents ?? []).map(normalizeAgentEntry),
+	skills: (config.skills ?? []).map(normalizeSkillEntry),
+	outputStyles: (config.outputStyles ?? []).map(normalizeOutputStyleEntry),
+	hooksConfig: normalizeHooksConfig(config.hooksConfig),
+	mcpConfig: normalizeMcpConfig(config.mcpConfig)
 });
 
 // ---------------------------------------------------------------------------
@@ -170,10 +357,9 @@ const makeDir = (
  *
  * @internal
  */
-const writeFlatEntries = (
+const writeCommandEntries = (
 	dir: string,
-	entries: ReadonlyArray<PluginFileEntry>,
-	extension: string
+	entries: ReadonlyArray<PluginCommandEntry>
 ): Effect.Effect<
 	void,
 	PluginWriteError,
@@ -184,7 +370,28 @@ const writeFlatEntries = (
 		const path = yield* Path.Path;
 		yield* makeDir(dir);
 		yield* Effect.forEach(entries, (entry) =>
-			writeFile(path.join(dir, `${entry.name}${extension}`), entry.content)
+			writeFile(
+				path.join(dir, `${entry.name}.md`),
+				renderCommand(entry.frontmatter, entry.body)
+			)
+		);
+	});
+
+const writeFlatNamedEntries = <Entry extends { readonly name: string }>(
+	dir: string,
+	entries: ReadonlyArray<Entry>,
+	renderEntry: (entry: Entry) => string
+): Effect.Effect<
+	void,
+	PluginWriteError,
+	FileSystem.FileSystem | Path.Path
+> =>
+	Effect.gen(function* () {
+		if (entries.length === 0) return;
+		const path = yield* Path.Path;
+		yield* makeDir(dir);
+		yield* Effect.forEach(entries, (entry) =>
+			writeFile(path.join(dir, `${entry.name}.md`), renderEntry(entry))
 		);
 	});
 
@@ -197,7 +404,7 @@ const writeFlatEntries = (
  */
 const writeSkillEntries = (
 	skillsDir: string,
-	entries: ReadonlyArray<PluginFileEntry>
+	entries: ReadonlyArray<PluginSkillEntry>
 ): Effect.Effect<
 	void,
 	PluginWriteError,
@@ -211,7 +418,10 @@ const writeSkillEntries = (
 			Effect.gen(function* () {
 				const dir = path.join(skillsDir, entry.name);
 				yield* makeDir(dir);
-				yield* writeFile(path.join(dir, 'SKILL.md'), entry.content);
+				yield* writeFile(
+					path.join(dir, 'SKILL.md'),
+					renderSkill(entry.frontmatter, entry.body)
+				);
 			})
 		);
 	});
@@ -258,7 +468,9 @@ const toJsonFileContent = (value: unknown): string =>
  *
  * const def = Plugin.define({
  *   manifest: { name: 'my-plugin' },
- *   commands: [{ name: 'hi', content: '# /hi\n' }]
+ *   commands: [
+ *     Plugin.command({ name: 'hi', body: '# /hi\n' })
+ *   ]
  * })
  *
  * Effect.runPromise(
@@ -288,17 +500,16 @@ export const write = (
 		);
 
 		// commands/<name>.md
-		yield* writeFlatEntries(
+		yield* writeCommandEntries(
 			path.join(destDir, 'commands'),
-			definition.commands,
-			'.md'
+			definition.commands
 		);
 
 		// agents/<name>.md
-		yield* writeFlatEntries(
+		yield* writeFlatNamedEntries(
 			path.join(destDir, 'agents'),
 			definition.agents,
-			'.md'
+			(entry) => renderSubagent(entry.frontmatter, entry.body)
 		);
 
 		// skills/<name>/SKILL.md
@@ -308,10 +519,10 @@ export const write = (
 		);
 
 		// output-styles/<name>.md
-		yield* writeFlatEntries(
+		yield* writeFlatNamedEntries(
 			path.join(destDir, 'output-styles'),
 			definition.outputStyles,
-			'.md'
+			(entry) => renderOutputStyle(entry.frontmatter, entry.body)
 		);
 
 		// hooks/hooks.json

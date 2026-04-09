@@ -38,3 +38,7 @@ export class CommandFrontmatter extends Schema.Class<CommandFrontmatter>(
 	'disable-model-invocation': Schema.optional(Schema.Boolean),
 	model: Schema.optional(Schema.String)
 }) {}
+
+export type CommandFrontmatterInput = ConstructorParameters<
+	typeof CommandFrontmatter
+>[0];

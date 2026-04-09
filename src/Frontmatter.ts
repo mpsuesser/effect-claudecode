@@ -18,6 +18,15 @@
 export { parse, parseFile } from './Frontmatter/Parser.ts';
 export type { ParsedFrontmatter } from './Frontmatter/Parser.ts';
 
+export {
+	render,
+	renderCommand,
+	renderOutputStyle,
+	renderSkill,
+	renderSubagent
+} from './Frontmatter/Render.ts';
+export type { FrontmatterDocument } from './Frontmatter/Render.ts';
+
 // ---------------------------------------------------------------------------
 // Per-file-type schemas
 // ---------------------------------------------------------------------------
@@ -26,3 +35,7 @@ export { SkillFrontmatter } from './Frontmatter/Skill.ts';
 export { SubagentFrontmatter } from './Frontmatter/Subagent.ts';
 export { CommandFrontmatter } from './Frontmatter/Command.ts';
 export { OutputStyleFrontmatter } from './Frontmatter/OutputStyle.ts';
+export type { SkillFrontmatterInput } from './Frontmatter/Skill.ts';
+export type { SubagentFrontmatterInput } from './Frontmatter/Subagent.ts';
+export type { CommandFrontmatterInput } from './Frontmatter/Command.ts';
+export type { OutputStyleFrontmatterInput } from './Frontmatter/OutputStyle.ts';

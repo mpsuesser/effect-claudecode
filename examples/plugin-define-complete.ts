@@ -41,18 +41,19 @@ const plugin = Plugin.define({
 		keywords: ['effect', 'guardrails', 'claude-code']
 	},
 	commands: [
-		{
+		Plugin.command({
 			name: 'review',
-			content:
-				'---\ndescription: Review staged diffs for Effect v4 compliance\n---\n\n# Review\n\nReview the staged changes for Effect v4 compliance and report any issues.\n'
-		}
+			description: 'Review staged diffs for Effect v4 compliance',
+			body:
+				'# Review\n\nReview the staged changes for Effect v4 compliance and report any issues.\n'
+		})
 	],
 	skills: [
-		{
+		Plugin.skill({
 			name: 'greet',
-			content:
-				'---\nname: greet\ndescription: Say hello to the user\n---\n\n# Greet\n\nSay hi in a friendly tone.\n'
-		}
+			description: 'Say hello to the user',
+			body: '# Greet\n\nSay hi in a friendly tone.\n'
+		})
 	],
 	hooksConfig: {
 		PreToolUse: [

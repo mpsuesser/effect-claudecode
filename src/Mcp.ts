@@ -28,3 +28,4 @@ export {
 // ---------------------------------------------------------------------------
 
 export { McpJsonFile, loadJson } from './Mcp/JsonFile.ts';
+export type { McpJsonFileInput } from './Mcp/JsonFile.ts';

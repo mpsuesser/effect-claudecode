@@ -76,3 +76,7 @@ export class SubagentFrontmatter extends Schema.Class<SubagentFrontmatter>(
 	permissions: Schema.optional(PermissionsConfig),
 	hooks: Schema.optional(HooksSection)
 }) {}
+
+export type SubagentFrontmatterInput = ConstructorParameters<
+	typeof SubagentFrontmatter
+>[0];

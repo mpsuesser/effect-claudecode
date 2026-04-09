@@ -46,6 +46,8 @@ export class McpJsonFile extends Schema.Class<McpJsonFile>('McpJsonFile')({
 	mcpServers: Schema.Record(Schema.String, McpServerConfig)
 }) {}
 
+export type McpJsonFileInput = ConstructorParameters<typeof McpJsonFile>[0];
+
 // ---------------------------------------------------------------------------
 // Loader
 // ---------------------------------------------------------------------------

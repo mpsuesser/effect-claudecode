@@ -87,16 +87,18 @@ const plugin = Plugin.define({
 		author: new Plugin.AuthorInfo({ name: 'Alice' })
 	},
 	commands: [
-		{
+		Plugin.command({
 			name: 'review',
-			content: '---\ndescription: Review staged diffs\n---\n# Review\n'
-		}
+			description: 'Review staged diffs',
+			body: '# Review\n'
+		})
 	],
 	skills: [
-		{
+		Plugin.skill({
 			name: 'greet',
-			content: '---\nname: greet\ndescription: Say hello\n---\n# Greet\n'
-		}
+			description: 'Say hello',
+			body: '# Greet\n'
+		})
 	],
 	hooksConfig: {
 		PreToolUse: [
@@ -350,16 +352,32 @@ const plugin = Plugin.define({
 		keywords: ['effect', 'guardrails']
 	},
 	commands: [
-		{ name: 'review', content: '---\ndescription: Review diffs\n---\n' }
+		Plugin.command({
+			name: 'review',
+			description: 'Review diffs',
+			body: '# Review\n'
+		})
 	],
 	agents: [
-		{ name: 'reviewer', content: '---\nname: reviewer\n---\n' }
+		Plugin.agent({
+			name: 'reviewer',
+			description: 'Review code changes',
+			body: '# Reviewer\n'
+		})
 	],
 	skills: [
-		{ name: 'greet', content: '---\nname: greet\ndescription: Say hi\n---\n' }
+		Plugin.skill({
+			name: 'greet',
+			description: 'Say hi',
+			body: '# Greet\n'
+		})
 	],
 	outputStyles: [
-		{ name: 'terse', content: '---\nname: terse\n---\n' }
+		Plugin.outputStyle({
+			name: 'terse',
+			description: 'Keep responses compact',
+			body: '# Terse\n'
+		})
 	],
 	hooksConfig: {
 		/* same shape as the "hooks" section of .claude/settings.json */
@@ -370,7 +388,7 @@ const plugin = Plugin.define({
 });
 ```
 
-All component arrays are optional. `hooksConfig` and `mcpConfig` are plain records that match the wire formats of `hooks.json` and `.mcp.json` respectively — they're written to disk verbatim.
+All component arrays are optional. Use `Plugin.command(...)`, `Plugin.agent(...)`, `Plugin.skill(...)`, and `Plugin.outputStyle(...)` to author typed markdown components without hand-writing YAML frontmatter strings. `hooksConfig` is typed as `Settings.HooksSection`, and `mcpConfig` is typed as `Mcp.McpJsonFile`.
 
 ### `Plugin.write`
 
@@ -415,7 +433,7 @@ Requires `FileSystem` and `Path` services. Fails with `PluginWriteError { path, 
 
 ## Frontmatter
 
-Split YAML frontmatter from a markdown body and decode it:
+Split YAML frontmatter from a markdown body and decode it, or render typed frontmatter back into markdown:
 
 ```ts
 import * as NodeFileSystem from '@effect/platform-node-shared/NodeFileSystem';
@@ -437,6 +455,19 @@ const program = Effect.gen(function* () {
 });
 
 Effect.runPromise(program.pipe(Effect.provide(NodeFileSystem.layer)));
+```
+
+```ts
+import { Frontmatter } from 'effect-claudecode';
+
+const markdown = Frontmatter.renderSkill(
+	{
+		name: 'greet',
+		description: 'Say hello',
+		'allowed-tools': ['Read']
+	},
+	'# Greet\n\nSay hello to the user.\n'
+);
 ```
 
 If the source has no `---` delimiters, `parseFile` returns `{ frontmatter: undefined, body: source }` (no error). Malformed YAML between valid delimiters fails with `FrontmatterParseError`. I/O failures surface as `FrontmatterReadError`.
