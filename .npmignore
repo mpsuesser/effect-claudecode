@@ -7,6 +7,5 @@ test/
 vitest.config.ts
 vitest.setup.ts
 tsconfig.json
-tsconfig.build.json
 tsconfig.tsbuildinfo
 bun.lock

@@ -26,21 +26,17 @@
   },
   "type": "module",
   "files": [
-    "dist",
+    "src",
     "README.md",
     "LICENSE"
   ],
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./src/index.ts"
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "check": "bun run build && bun run test && bun run typecheck",
+    "check": "bun run test && bun run typecheck",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "bun run check"

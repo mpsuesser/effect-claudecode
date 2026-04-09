@@ -670,8 +670,7 @@ Complete runnable examples live in [`examples/`](./examples):
 
 ```sh
 bun install
-bun run build                                           # emit dist/ for publishing
-bun run check                                           # build + test + typecheck
+bun run check                                           # test + typecheck
 bun run test                                            # vitest run — all tests
 bun run typecheck                                       # tsc --noEmit
 bunx vitest run test/Hook/Events/PreToolUse.test.ts     # single file
