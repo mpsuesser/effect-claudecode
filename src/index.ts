@@ -7,6 +7,7 @@
  */
 
 export * as ClaudeRuntime from './ClaudeRuntime.ts';
+export * as ClaudeProject from './ClaudeProject.ts';
 
 // ---------------------------------------------------------------------------
 // Shared runtime
