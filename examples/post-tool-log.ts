@@ -33,15 +33,10 @@ import { Hook } from 'effect-claudecode';
 
 const LARGE_OUTPUT_THRESHOLD = 10_000;
 
-const hook = Hook.PostToolUse.define({
-	handler: (input) => {
-		if (input.tool_name !== 'Bash') {
-			return Effect.succeed(Hook.PostToolUse.passthrough());
-		}
-		const output =
-			typeof input.tool_response['output'] === 'string'
-				? input.tool_response['output']
-				: '';
+const hook = Hook.PostToolUse.onTool({
+	toolName: 'Bash',
+	handler: ({ response }) => {
+		const output = response.output ?? '';
 		return Effect.succeed(
 			output.length > LARGE_OUTPUT_THRESHOLD
 				? Hook.PostToolUse.addContext(

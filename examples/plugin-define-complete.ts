@@ -22,12 +22,9 @@
  *
  * @since 0.1.0
  */
-import * as NodeFileSystem from '@effect/platform-node-shared/NodeFileSystem';
-import * as NodePath from '@effect/platform-node-shared/NodePath';
 import * as Effect from 'effect/Effect';
-import * as Layer from 'effect/Layer';
 
-import { Plugin } from 'effect-claudecode';
+import { ClaudeRuntime, Plugin } from 'effect-claudecode';
 
 const plugin = Plugin.define({
 	manifest: {
@@ -81,11 +78,11 @@ const plugin = Plugin.define({
 
 const destDir = process.argv[2] ?? './dist-plugin';
 
-const PlatformLive = Layer.merge(NodeFileSystem.layer, NodePath.layer);
-
 const program = Plugin.write(plugin, destDir).pipe(
-	Effect.tap(() => Effect.logInfo(`Plugin written to ${destDir}`)),
-	Effect.provide(PlatformLive)
+	Effect.tap(() => Effect.logInfo(`Plugin written to ${destDir}`))
 );
 
-Effect.runPromise(program);
+const runtime = ClaudeRuntime.default();
+
+await runtime.runPromise(program);
+await runtime.dispose();

@@ -38,14 +38,11 @@ const DESTRUCTIVE_PATTERNS: ReadonlyArray<RegExp> = [
 	/:\(\)\{.*:\|:&.*\};/ // fork bomb
 ];
 
-const hook = Hook.PreToolUse.define({
-	handler: (input) => {
-		const command =
-			typeof input.tool_input['command'] === 'string'
-				? input.tool_input['command']
-				: '';
+const hook = Hook.PreToolUse.onTool({
+	toolName: 'Bash',
+	handler: ({ tool }) => {
 		const hit = DESTRUCTIVE_PATTERNS.find((pattern) =>
-			pattern.test(command)
+			pattern.test(tool.command)
 		);
 		return Effect.succeed(
 			hit !== undefined

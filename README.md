@@ -2,7 +2,7 @@
 
 Write [Claude Code](https://code.claude.com) plugins — hooks, skills, subagents, commands, MCP servers — with [Effect v4](https://effect.website).
 
-`effect-claudecode` wraps Claude Code's plugin primitives (stdio hook processes, `.claude/settings.json`, `plugin.json` manifests, frontmatter files, `.mcp.json`) in Effect idioms, so plugin authors get typed input/output schemas for all 26 hook events, Effect-native handlers with injected context, decision constructors per event, and correct stdio/exit-code semantics for free — no more hand-parsing snake_case JSON or gluing `process.exit` calls together.
+`effect-claudecode` wraps Claude Code's plugin primitives (stdio hook processes, `.claude/settings.json`, `plugin.json` manifests, frontmatter files, `.mcp.json`) in Effect idioms, so plugin authors get typed input/output schemas for all 26 hook events, Effect-native handlers with injected context, decision constructors per event, correct stdio/exit-code semantics for free, and higher-level runtime helpers for shared project state — no more hand-parsing snake_case JSON or gluing `process.exit` calls together.
 
 The examples below keep `Effect.run*` at the runtime boundary and keep the actual hook logic inside `Effect.gen` blocks with `yield*`, injected services, and Effect-native logging.
 
@@ -13,9 +13,14 @@ The examples below keep `Effect.run*` at the runtime boundary and keep the actua
 - **Decision constructors per event** — `Hook.PreToolUse.deny('reason')`, `Hook.UserPromptSubmit.block('off-topic')`, `Hook.SessionStart.addContext('extra')`
 - **`HookContext` service** — `yield* Hook.sessionId`, `yield* Hook.cwd`, `yield* Hook.transcriptPath` inside any handler
 - **`Hook.dispatch({...})`** — handle multiple event types from a single binary
+- **`Hook.Tool` + `Hook.PreToolUse.onTool(...)` / `Hook.PostToolUse.onTool(...)`** — typed adapters for common tool payloads like `Bash` and `Read`
+- **`HookBus`** — publish decoded hook events to a typed in-process `Stream`
+- **`ClaudeRuntime.default()`** — prewired `ManagedRuntime` for `FileSystem`, `Path`, and Effect logging in any effect-claudecode program
+- **`ClaudeProject.layer({ cwd })`** — cached project-scoped access to settings, `.mcp.json`, plugin directories, and named component lookups with explicit invalidation
 - **`Settings.load(cwd)`** — Effect loader that reads and merges enterprise/user/project/local `settings.json` files into one typed `SettingsFile`
 - **`Plugin.define({...})` + `Plugin.write(def, dir)`** — declarative plugin builder + materializer that produces a complete plugin directory tree
-- **`Frontmatter.parseFile(path)`** — split YAML frontmatter from markdown bodies; decode with `SkillFrontmatter`, `SubagentFrontmatter`, `CommandFrontmatter`, or `OutputStyleFrontmatter`
+- **`Plugin.scan(dir)` / `Plugin.load(dir)` / `Plugin.sync(def)`** — inspect, round-trip, and normalize existing plugin directories
+- **`Frontmatter.parseSkillFile(path)` and friends** — one-step typed markdown loaders for skills, commands, subagents, and output styles
 - **`Mcp.loadJson(path)`** — read `.mcp.json` into a discriminated `stdio` / `http` / `sse` union with typed authorization variants
 - **Testing module** — fixtures for every event, end-to-end `runHookWithMockStdin`, `expect*Decision` helpers, mock filesystem/stdio/context layers
 
@@ -37,14 +42,13 @@ bun add effect-claudecode effect@4.0.0-beta.43 @effect/platform-node-shared@4.0.
 
 ```ts
 import * as Effect from 'effect/Effect';
-import * as P from 'effect/Predicate';
 import { Hook } from 'effect-claudecode';
 
-const hook = Hook.PreToolUse.define({
-	handler: (input) =>
+const hook = Hook.PreToolUse.onTool({
+	toolName: 'Bash',
+	handler: ({ tool }) =>
 		Effect.gen(function* () {
-			const command = input.tool_input['command'];
-			return /rm\s+-rf\s+\//.test(P.isString(command) ? command : '')
+			return /rm\s+-rf\s+\//.test(tool.command)
 				? Hook.PreToolUse.deny('destructive command rejected')
 				: Hook.PreToolUse.allow();
 		})
@@ -73,12 +77,9 @@ Save as `hooks/pre-bash-denylist.ts`, then wire it into `.claude/settings.json`:
 ### A complete plugin via `Plugin.define` + `Plugin.write`
 
 ```ts
-import * as NodeFileSystem from '@effect/platform-node-shared/NodeFileSystem';
-import * as NodePath from '@effect/platform-node-shared/NodePath';
 import * as Effect from 'effect/Effect';
-import * as Layer from 'effect/Layer';
 
-import { Plugin } from 'effect-claudecode';
+import { ClaudeRuntime, Plugin } from 'effect-claudecode';
 
 const plugin = Plugin.define({
 	manifest: {
@@ -112,14 +113,36 @@ const plugin = Plugin.define({
 	}
 });
 
-const PlatformLive = Layer.merge(NodeFileSystem.layer, NodePath.layer);
+const runtime = ClaudeRuntime.default();
 
-const program = Plugin.write(plugin, './dist-plugin').pipe(
-	Effect.tap(() => Effect.logInfo('plugin written to ./dist-plugin')),
-	Effect.provide(PlatformLive)
+await runtime.runPromise(
+	Plugin.write(plugin, './dist-plugin').pipe(
+		Effect.tap(() => Effect.logInfo('plugin written to ./dist-plugin'))
+	)
 );
 
-Effect.runPromise(program);
+await runtime.dispose();
+```
+
+### Shared runtime for non-hook programs
+
+`ClaudeRuntime.default()` is useful for any effect-claudecode program that is not a one-shot hook entrypoint: plugin build scripts, validation tools, local diagnostics, and test harnesses. It gives you a reusable `ManagedRuntime` with the common platform wiring already in place:
+
+```ts
+import * as Effect from 'effect/Effect';
+
+import { ClaudeRuntime, Plugin } from 'effect-claudecode';
+
+const runtime = ClaudeRuntime.default();
+
+const report = await runtime.runPromise(
+	Effect.gen(function* () {
+		const scanned = yield* Plugin.scan('./dist-plugin');
+		return scanned.inferredManifest.name;
+	})
+);
+
+await runtime.dispose();
 ```
 
 ## Hooks
@@ -136,6 +159,31 @@ Effect.runPromise(program);
 6. Exits the process with the right code (`0` success, `1` non-blocking error, `2` blocking decode error, `130` SIGINT)
 
 The runner internally provides `NodeStdio.layer` from `@effect/platform-node-shared` and installs a custom `Runtime.Teardown` for exit-code mapping. You never call `process.exit`, manually decode stdin, or hand-roll stdout/exit handling yourself.
+
+### Typed tool adapters
+
+For common Claude Code tools, `Hook.Tool` and the `onTool(...)` helpers remove the repetitive `tool_input['...']` / `tool_response['...']` narrowing:
+
+```ts
+import * as Effect from 'effect/Effect';
+import { Hook } from 'effect-claudecode';
+
+const hook = Hook.PostToolUse.onTool({
+	toolName: 'Read',
+	handler: ({ tool, response }) =>
+		Effect.succeed(
+			(response.content ?? '').length > 0
+				? Hook.PostToolUse.addContext(
+						`Read ${tool.file_path} (${(response.content ?? '').length} chars)`
+					)
+				: Hook.PostToolUse.passthrough()
+		)
+});
+
+Hook.runMain(hook);
+```
+
+Currently the built-in typed adapters cover `Bash` and `Read`. The lower-level `Hook.Tool.decodePreToolUse(...)` / `decodePostToolUse(...)` helpers are also exported if you want the typed decoding without the `onTool(...)` wrapper.
 
 ### Event definition
 
@@ -395,21 +443,19 @@ All component arrays are optional. Use `Plugin.command(...)`, `Plugin.agent(...)
 Materializes a `PluginDefinition` to disk at `destDir`:
 
 ```ts
-import * as NodeFileSystem from '@effect/platform-node-shared/NodeFileSystem';
-import * as NodePath from '@effect/platform-node-shared/NodePath';
 import * as Effect from 'effect/Effect';
-import * as Layer from 'effect/Layer';
 
-import { Plugin } from 'effect-claudecode';
+import { ClaudeRuntime, Plugin } from 'effect-claudecode';
 
-const PlatformLive = Layer.merge(NodeFileSystem.layer, NodePath.layer);
+const runtime = ClaudeRuntime.default();
 
-const program = Plugin.write(plugin, './dist-plugin').pipe(
-	Effect.tap(() => Effect.logInfo('plugin written to ./dist-plugin')),
-	Effect.provide(PlatformLive)
+await runtime.runPromise(
+	Plugin.write(plugin, './dist-plugin').pipe(
+		Effect.tap(() => Effect.logInfo('plugin written to ./dist-plugin'))
+	)
 );
 
-Effect.runPromise(program);
+await runtime.dispose();
 ```
 
 Directory layout produced:
@@ -425,7 +471,31 @@ Directory layout produced:
 └── .mcp.json                    (only if mcpConfig was provided)
 ```
 
-Requires `FileSystem` and `Path` services. Fails with `PluginWriteError { path, cause }`.
+Requires `FileSystem` and `Path` services. `ClaudeRuntime.default()` is the simplest way to provide them in one-shot build and maintenance scripts. Fails with `PluginWriteError { path, cause }`.
+
+### `Plugin.scan` / `Plugin.load` / `Plugin.sync`
+
+Use the load helpers to introspect and normalize existing plugin directories:
+
+```ts
+import * as Effect from 'effect/Effect';
+
+import { ClaudeRuntime, Plugin } from 'effect-claudecode';
+
+const runtime = ClaudeRuntime.default();
+
+const loaded = await runtime.runPromise(Plugin.load('./dist-plugin'));
+const synced = Plugin.sync(loaded);
+
+console.log(loaded.manifest.name);
+console.log(synced.manifest.commands); // 'commands' when command files exist
+
+await runtime.dispose();
+```
+
+- `Plugin.scan(dir)` inspects the canonical component layout and infers a normalized manifest.
+- `Plugin.load(dir)` parses the discovered command, agent, skill, and output-style files into a typed `PluginDefinition`.
+- `Plugin.sync(def)` rewrites manifest path fields to the canonical layout produced by `Plugin.write`.
 
 #### Exported schemas
 
@@ -436,25 +506,21 @@ Requires `FileSystem` and `Path` services. Fails with `PluginWriteError { path, 
 Split YAML frontmatter from a markdown body and decode it, or render typed frontmatter back into markdown:
 
 ```ts
-import * as NodeFileSystem from '@effect/platform-node-shared/NodeFileSystem';
 import * as Console from 'effect/Console';
 import * as Effect from 'effect/Effect';
-import * as Schema from 'effect/Schema';
 
-import { Frontmatter } from 'effect-claudecode';
+import { ClaudeRuntime, Frontmatter } from 'effect-claudecode';
 
-const program = Effect.gen(function* () {
-	const parsed = yield* Frontmatter.parseFile('./skills/greet/SKILL.md');
-	// parsed: { frontmatter: unknown, body: string }
+const runtime = ClaudeRuntime.default();
 
-	const skill = yield* Schema.decodeUnknownEffect(Frontmatter.SkillFrontmatter)(
-		parsed.frontmatter
-	);
-	// skill: { name: string, description: string, ... }
-	yield* Console.log(skill.name);
-});
+await runtime.runPromise(
+	Effect.gen(function* () {
+		const parsed = yield* Frontmatter.parseSkillFile('./skills/greet/SKILL.md');
+		yield* Console.log(parsed.frontmatter.name);
+	})
+);
 
-Effect.runPromise(program.pipe(Effect.provide(NodeFileSystem.layer)));
+await runtime.dispose();
 ```
 
 ```ts
@@ -470,9 +536,93 @@ const markdown = Frontmatter.renderSkill(
 );
 ```
 
-If the source has no `---` delimiters, `parseFile` returns `{ frontmatter: undefined, body: source }` (no error). Malformed YAML between valid delimiters fails with `FrontmatterParseError`. I/O failures surface as `FrontmatterReadError`.
+If the source has no `---` delimiters, `parseFile` returns `{ frontmatter: undefined, body: source }` (no error). Malformed YAML between valid delimiters fails with `FrontmatterParseError`. I/O failures surface as `FrontmatterReadError`. Typed helpers like `parseSkillFile` additionally surface schema mismatches as `FrontmatterDecodeError`.
 
 For in-memory sources use `Frontmatter.parse(source, path)` — same return type, no FileSystem requirement.
+
+## ClaudeProject
+
+`ClaudeProject.layer({ cwd })` wraps the common project-level loaders in explicit caches so repeated hook invocations or local tooling can reuse parsed state until you decide to invalidate it:
+
+```ts
+import * as Effect from 'effect/Effect';
+import * as Option from 'effect/Option';
+
+import { ClaudeProject, ClaudeRuntime } from 'effect-claudecode';
+
+const runtime = ClaudeRuntime.default({
+	layer: ClaudeProject.ClaudeProject.layer({ cwd: process.cwd() })
+});
+
+const summary = await runtime.runPromise(
+	Effect.gen(function* () {
+		const project = yield* ClaudeProject.project;
+		const settings = yield* project.settings;
+		const reviewSkill = yield* project.skill('review');
+		return {
+			model: settings.model,
+			hasReviewSkill: Option.isSome(reviewSkill)
+		};
+	})
+);
+
+await runtime.dispose();
+```
+
+The service exposes cached `settings`, optional cached `mcp`, cached `plugin`, name-based component lookups (`skill`, `command`, `agent`, `outputStyle`), and explicit invalidators under `project.invalidate.*`.
+
+## HookBus
+
+`HookBus` is a typed in-process event bus over decoded hook inputs. It is useful for multi-event binaries, reactive local tooling, or any long-lived process that wants to build `Stream` pipelines over Claude Code events:
+
+```ts
+import * as Deferred from 'effect/Deferred';
+import * as Effect from 'effect/Effect';
+import * as Stream from 'effect/Stream';
+
+import { Hook } from 'effect-claudecode';
+
+const program = Effect.scoped(
+	Effect.gen(function* () {
+		const bus = yield* Hook.HookBus.Service;
+		const done = yield* Deferred.make<ReadonlyArray<string>>();
+
+		yield* bus
+			.stream('FileChanged')
+			.pipe(
+				Stream.map((event) => event.file_path),
+				Stream.take(2),
+				Stream.runCollect,
+				Effect.flatMap((paths) => Deferred.succeed(done, Array.from(paths))),
+				Effect.forkScoped
+			);
+
+		yield* Effect.yieldNow;
+		yield* bus.publish(
+			new Hook.FileChanged.Input({
+				session_id: 'session-1',
+				transcript_path: '/tmp/t.jsonl',
+				cwd: '/repo',
+				hook_event_name: 'FileChanged',
+				file_path: '/repo/a.ts',
+				change_type: 'modified'
+			})
+		);
+		yield* bus.publish(
+			new Hook.FileChanged.Input({
+				session_id: 'session-1',
+				transcript_path: '/tmp/t.jsonl',
+				cwd: '/repo',
+				hook_event_name: 'FileChanged',
+				file_path: '/repo/b.ts',
+				change_type: 'modified'
+			})
+		);
+
+		return yield* Deferred.await(done);
+	}).pipe(Effect.provide(Hook.HookBus.layer))
+);
+```
 
 #### Exported schemas
 
