@@ -165,6 +165,20 @@ export class PluginWriteError extends Schema.TaggedErrorClass<PluginWriteError>(
 	cause: Schema.Defect
 }) {}
 
+/**
+ * Raised when reading, parsing, or decoding an existing plugin directory
+ * fails.
+ *
+ * @category Plugin errors
+ * @since 0.1.0
+ */
+export class PluginLoadError extends Schema.TaggedErrorClass<PluginLoadError>(
+	'effect-claudecode/PluginLoadError'
+)('PluginLoadError', {
+	path: Schema.String,
+	cause: Schema.Defect
+}) {}
+
 // ---------------------------------------------------------------------------
 // Frontmatter errors
 // ---------------------------------------------------------------------------

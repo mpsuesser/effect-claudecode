@@ -62,3 +62,6 @@ export type {
 	PluginSkillConfig,
 	PluginSkillEntry
 } from './Plugin/Define.ts';
+
+export { load, scan, sync } from './Plugin/Load.ts';
+export type { LoadedPlugin, PluginScan } from './Plugin/Load.ts';
