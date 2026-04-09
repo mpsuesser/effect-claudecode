@@ -15,8 +15,18 @@
 // Parser
 // ---------------------------------------------------------------------------
 
-export { parse, parseFile } from './Frontmatter/Parser.ts';
-export type { ParsedFrontmatter } from './Frontmatter/Parser.ts';
+export {
+	parse,
+	parseCommandFile,
+	parseFile,
+	parseOutputStyleFile,
+	parseSkillFile,
+	parseSubagentFile
+} from './Frontmatter/Parser.ts';
+export type {
+	DecodedFrontmatter,
+	ParsedFrontmatter
+} from './Frontmatter/Parser.ts';
 
 export {
 	render,

@@ -23,12 +23,18 @@
  */
 import * as Effect from 'effect/Effect';
 import * as FileSystem from 'effect/FileSystem';
+import * as Schema from 'effect/Schema';
 import { parse as parseYaml } from 'yaml';
 
 import {
+	FrontmatterDecodeError,
 	FrontmatterParseError,
 	FrontmatterReadError
 } from '../Errors.ts';
+import { CommandFrontmatter } from './Command.ts';
+import { OutputStyleFrontmatter } from './OutputStyle.ts';
+import { SkillFrontmatter } from './Skill.ts';
+import { SubagentFrontmatter } from './Subagent.ts';
 
 // ---------------------------------------------------------------------------
 // Model
@@ -45,6 +51,18 @@ import {
  */
 export interface ParsedFrontmatter {
 	readonly frontmatter: unknown;
+	readonly body: string;
+}
+
+/**
+ * A parsed markdown file whose frontmatter has been validated against a
+ * concrete schema.
+ *
+ * @category Models
+ * @since 0.1.0
+ */
+export interface DecodedFrontmatter<TFrontmatter> {
+	readonly frontmatter: TFrontmatter;
 	readonly body: string;
 }
 
@@ -98,6 +116,26 @@ const decodeYaml = (
 		try: () => parseYaml(yaml),
 		catch: (cause) => new FrontmatterParseError({ path, cause })
 	});
+
+const decodeFrontmatter = <A>(
+	path: string,
+	parsed: ParsedFrontmatter,
+	decode: (input: unknown) => A
+): Effect.Effect<DecodedFrontmatter<A>, FrontmatterDecodeError> =>
+	Effect.try({
+		try: () => ({
+			frontmatter: decode(parsed.frontmatter),
+			body: parsed.body
+		}),
+		catch: (cause) => new FrontmatterDecodeError({ path, cause })
+	});
+
+const decodeSkillFrontmatter = Schema.decodeUnknownSync(SkillFrontmatter);
+const decodeCommandFrontmatter = Schema.decodeUnknownSync(CommandFrontmatter);
+const decodeSubagentFrontmatter = Schema.decodeUnknownSync(SubagentFrontmatter);
+const decodeOutputStyleFrontmatter = Schema.decodeUnknownSync(
+	OutputStyleFrontmatter
+);
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -193,3 +231,79 @@ export const parseFile = (
 			);
 		return yield* parse(source, path);
 	})(path);
+
+/**
+ * Read and decode a `SKILL.md` file in one step.
+ *
+ * @category Parser
+ * @since 0.1.0
+ */
+export const parseSkillFile = (
+	path: string
+): Effect.Effect<
+	DecodedFrontmatter<SkillFrontmatter>,
+	FrontmatterReadError | FrontmatterParseError | FrontmatterDecodeError,
+	FileSystem.FileSystem
+> =>
+	parseFile(path).pipe(
+		Effect.flatMap((parsed) =>
+			decodeFrontmatter(path, parsed, decodeSkillFrontmatter)
+		)
+	);
+
+/**
+ * Read and decode a slash-command markdown file in one step.
+ *
+ * @category Parser
+ * @since 0.1.0
+ */
+export const parseCommandFile = (
+	path: string
+): Effect.Effect<
+	DecodedFrontmatter<CommandFrontmatter>,
+	FrontmatterReadError | FrontmatterParseError | FrontmatterDecodeError,
+	FileSystem.FileSystem
+> =>
+	parseFile(path).pipe(
+		Effect.flatMap((parsed) =>
+			decodeFrontmatter(path, parsed, decodeCommandFrontmatter)
+		)
+	);
+
+/**
+ * Read and decode a subagent markdown file in one step.
+ *
+ * @category Parser
+ * @since 0.1.0
+ */
+export const parseSubagentFile = (
+	path: string
+): Effect.Effect<
+	DecodedFrontmatter<SubagentFrontmatter>,
+	FrontmatterReadError | FrontmatterParseError | FrontmatterDecodeError,
+	FileSystem.FileSystem
+> =>
+	parseFile(path).pipe(
+		Effect.flatMap((parsed) =>
+			decodeFrontmatter(path, parsed, decodeSubagentFrontmatter)
+		)
+	);
+
+/**
+ * Read and decode an output-style markdown file in one step.
+ *
+ * @category Parser
+ * @since 0.1.0
+ */
+export const parseOutputStyleFile = (
+	path: string
+): Effect.Effect<
+	DecodedFrontmatter<OutputStyleFrontmatter>,
+	FrontmatterReadError | FrontmatterParseError | FrontmatterDecodeError,
+	FileSystem.FileSystem
+> =>
+	parseFile(path).pipe(
+		Effect.flatMap((parsed) =>
+			decodeFrontmatter(path, parsed, decodeOutputStyleFrontmatter)
+		)
+	);

@@ -14,11 +14,16 @@ import * as Layer from 'effect/Layer';
 import * as PlatformError from 'effect/PlatformError';
 
 import {
+	FrontmatterDecodeError,
 	FrontmatterParseError,
 	FrontmatterReadError
 } from '../../src/Errors.ts';
+import * as Command from '../../src/Frontmatter/Command.ts';
+import * as OutputStyle from '../../src/Frontmatter/OutputStyle.ts';
 import * as Parser from '../../src/Frontmatter/Parser.ts';
 import * as Render from '../../src/Frontmatter/Render.ts';
+import * as Skill from '../../src/Frontmatter/Skill.ts';
+import * as Subagent from '../../src/Frontmatter/Subagent.ts';
 
 // ---------------------------------------------------------------------------
 // Test layer builder
@@ -214,6 +219,131 @@ describe('Frontmatter.parseFile', () => {
 			Effect.provide(
 				makeFileSystemLayer(
 					new Map([['/broken.md', '---\nname: [bad\n---\nbody\n']])
+				)
+			)
+		)
+	);
+});
+
+// ---------------------------------------------------------------------------
+// typed parse*File helpers
+// ---------------------------------------------------------------------------
+
+describe('Frontmatter.parse*File', () => {
+	it.effect('parseSkillFile decodes the skill frontmatter schema', () =>
+		Effect.gen(function* () {
+			const result = yield* Parser.parseSkillFile('/skills/greet/SKILL.md');
+			expect(result.frontmatter).toBeInstanceOf(Skill.SkillFrontmatter);
+			expect(result.frontmatter).toMatchObject({
+				name: 'greet',
+				description: 'Say hello'
+			});
+			expect(result.body.trim()).toBe('# Greet');
+		}).pipe(
+			Effect.provide(
+				makeFileSystemLayer(
+					new Map([
+						[
+							'/skills/greet/SKILL.md',
+							'---\nname: greet\ndescription: Say hello\n---\n\n# Greet\n'
+						]
+					])
+				)
+			)
+		)
+	);
+
+	it.effect('parseCommandFile decodes the command frontmatter schema', () =>
+		Effect.gen(function* () {
+			const result = yield* Parser.parseCommandFile('/commands/review.md');
+			expect(result.frontmatter).toBeInstanceOf(Command.CommandFrontmatter);
+			expect(result.frontmatter).toMatchObject({
+				description: 'Review staged diffs',
+				model: 'claude-sonnet-4-6'
+			});
+		}).pipe(
+			Effect.provide(
+				makeFileSystemLayer(
+					new Map([
+						[
+							'/commands/review.md',
+							'---\ndescription: Review staged diffs\nmodel: claude-sonnet-4-6\n---\n\n# /review\n'
+						]
+					])
+				)
+			)
+		)
+	);
+
+	it.effect('parseSubagentFile decodes the subagent frontmatter schema', () =>
+		Effect.gen(function* () {
+			const result = yield* Parser.parseSubagentFile('/agents/reviewer.md');
+			expect(result.frontmatter).toBeInstanceOf(Subagent.SubagentFrontmatter);
+			expect(result.frontmatter).toMatchObject({
+				name: 'reviewer',
+				description: 'Review code changes'
+			});
+		}).pipe(
+			Effect.provide(
+				makeFileSystemLayer(
+					new Map([
+						[
+							'/agents/reviewer.md',
+							'---\nname: reviewer\ndescription: Review code changes\nmodel: claude-opus-4-6\n---\n\n# Reviewer\n'
+						]
+					])
+				)
+			)
+		)
+	);
+
+	it.effect(
+		'parseOutputStyleFile decodes the output-style frontmatter schema',
+		() =>
+			Effect.gen(function* () {
+				const result = yield* Parser.parseOutputStyleFile(
+					'/output-styles/terse.md'
+				);
+				expect(result.frontmatter).toBeInstanceOf(
+					OutputStyle.OutputStyleFrontmatter
+				);
+				expect(result.frontmatter).toMatchObject({
+					name: 'terse',
+					description: 'Keep responses compact'
+				});
+			}).pipe(
+				Effect.provide(
+					makeFileSystemLayer(
+						new Map([
+							[
+								'/output-styles/terse.md',
+								'---\nname: terse\ndescription: Keep responses compact\n---\n\n# Terse\n'
+							]
+						])
+					)
+				)
+			)
+	);
+
+	it.effect('typed helpers surface schema mismatch as FrontmatterDecodeError', () =>
+		Effect.gen(function* () {
+			const raised = yield* Effect.flip(
+				Parser.parseSkillFile('/skills/bad/SKILL.md')
+			);
+			expect(raised).toBeInstanceOf(FrontmatterDecodeError);
+			expect(raised).toMatchObject({
+				_tag: 'FrontmatterDecodeError',
+				path: '/skills/bad/SKILL.md'
+			});
+		}).pipe(
+			Effect.provide(
+				makeFileSystemLayer(
+					new Map([
+						[
+							'/skills/bad/SKILL.md',
+							'---\ndescription: Missing name\n---\n\n# Broken\n'
+						]
+					])
 				)
 			)
 		)
