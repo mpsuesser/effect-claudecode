@@ -20,6 +20,7 @@ import * as Schema from 'effect/Schema';
 
 import * as Hook from '../src/Hook.ts';
 import * as Events from '../src/Hook/Events/index.ts';
+import * as Plugin from '../src/Plugin.ts';
 import * as Testing from '../src/Testing.ts';
 
 // ---------------------------------------------------------------------------
@@ -220,15 +221,28 @@ describe('Testing.expect*Decision', () => {
 // ---------------------------------------------------------------------------
 
 describe('Testing.makeMockFileSystem', () => {
-	it.effect('reads known files and reports not-found for unknown paths', () =>
-		Effect.gen(function* () {
+	it.effect('reads known files, lists directories, and records writes', () => {
+		const fileSystem = Testing.makeMockFileSystem({
+			'/repo/a.txt': 'A',
+			'/repo/nested/b.txt': 'B'
+		});
+
+		return Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem;
 
-			const existingContent = yield* fs.readFileString('/a.txt');
+			const existingContent = yield* fs.readFileString('/repo/a.txt');
 			expect(existingContent).toBe('A');
 
-			const existsA = yield* fs.exists('/a.txt');
+			const existsA = yield* fs.exists('/repo/a.txt');
 			expect(existsA).toBe(true);
+			expect(fileSystem.exists('/repo/nested')).toBe(true);
+
+			const entries = yield* fs.readDirectory('/repo');
+			expect(entries).toEqual(['a.txt', 'nested']);
+
+			yield* fs.makeDirectory('/repo/generated', { recursive: true });
+			yield* fs.writeFileString('/repo/generated/out.txt', 'OUT');
+			expect(fileSystem.readFile('/repo/generated/out.txt')).toBe('OUT');
 
 			const existsMissing = yield* fs.exists('/missing.txt');
 			expect(existsMissing).toBe(false);
@@ -236,26 +250,98 @@ describe('Testing.makeMockFileSystem', () => {
 			// Reading a missing file surfaces a typed PlatformError
 			const exit = yield* Effect.exit(fs.readFileString('/missing.txt'));
 			expect(exit._tag).toBe('Failure');
-		}).pipe(
-			Effect.provide(
-				Testing.makeMockFileSystem({
-					'/a.txt': 'A',
-					'/b.txt': 'B'
-				})
-			)
-		)
-	);
+		}).pipe(Effect.provide(fileSystem.layer));
+	});
 
-	it.effect('accepts a ReadonlyMap as well as a plain record', () =>
-		Effect.gen(function* () {
+	it.effect('accepts a ReadonlyMap as well as a plain record', () => {
+		const fileSystem = Testing.makeMockFileSystem(new Map([['/x', 'X']]));
+
+		return Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem;
 			const content = yield* fs.readFileString('/x');
 			expect(content).toBe('X');
-		}).pipe(
-			Effect.provide(
-				Testing.makeMockFileSystem(new Map([['/x', 'X']]))
-			)
-		)
+		}).pipe(Effect.provide(fileSystem.layer));
+	});
+
+	it.effect('supports targeted failure injection', () => {
+		const fileSystem = Testing.makeMockFileSystem(
+			{},
+			{
+				failOn: (operation, path) =>
+					operation === 'writeFileString' && path === '/dest/out.txt'
+			}
+		);
+
+		return Effect.gen(function* () {
+			const fs = yield* FileSystem.FileSystem;
+			yield* fs.makeDirectory('/dest', { recursive: true });
+			const exit = yield* Effect.exit(
+				fs.writeFileString('/dest/out.txt', 'OUT')
+			);
+			expect(exit._tag).toBe('Failure');
+		}).pipe(Effect.provide(fileSystem.layer));
+	});
+});
+
+describe('Testing plugin helpers', () => {
+	it.effect('writePluginToMemory materializes a complete plugin tree', () =>
+		Effect.gen(function* () {
+			const plugin = Plugin.define({
+				manifest: { name: 'guardrails', version: '0.1.0' },
+				commands: [
+					Plugin.command({
+						name: 'review',
+						description: 'Review staged changes',
+						body: '# Review\n'
+					})
+				],
+				skills: [
+					Plugin.skill({
+						name: 'greet',
+						description: 'Say hi',
+						body: '# Greet\n'
+					})
+				],
+				hooksConfig: {
+					PostToolUse: []
+				}
+			});
+
+			const fileSystem = yield* Testing.writePluginToMemory(plugin, '/plugin');
+
+			Testing.expectPluginTree(fileSystem, {
+				'/plugin/.claude-plugin/plugin.json': /"name": "guardrails"/,
+				'/plugin/commands/review.md': /description: Review staged changes/,
+				'/plugin/skills/greet/SKILL.md': /name: greet/,
+				'/plugin/hooks/hooks.json': /"PostToolUse"/
+			});
+		})
+	);
+
+	it.effect('roundTripPlugin writes and reloads the plugin from memory', () =>
+		Effect.gen(function* () {
+			const plugin = Plugin.define({
+				manifest: { name: 'guardrails' },
+				outputStyles: [
+					Plugin.outputStyle({
+						name: 'terse',
+						description: 'Keep responses brief',
+						body: '# Terse\n'
+					})
+				]
+			});
+
+			const result = yield* Testing.roundTripPlugin(plugin, '/plugin');
+
+			expect(result.loaded.manifest.name).toBe('guardrails');
+			expect(result.loaded.outputStyles).toHaveLength(1);
+			expect(result.loaded.outputStyles[0]).toMatchObject({
+				name: 'terse'
+			});
+			expect(result.fileSystem.readFile('/plugin/output-styles/terse.md')).toContain(
+				'name: terse'
+			);
+		})
 	);
 });
 

@@ -8,67 +8,15 @@
  */
 import { describe, expect, it } from '@effect/vitest';
 import * as Effect from 'effect/Effect';
-import * as FileSystem from 'effect/FileSystem';
-import * as Layer from 'effect/Layer';
 import * as Option from 'effect/Option';
-import * as Path from 'effect/Path';
-import * as PlatformError from 'effect/PlatformError';
 
 import { PluginLoadError } from '../../src/Errors.ts';
 import * as Plugin from '../../src/Plugin.ts';
+import * as Testing from '../../src/Testing.ts';
 
 // ---------------------------------------------------------------------------
-// Test layer builder
+// Test tree builder
 // ---------------------------------------------------------------------------
-
-const notFoundError = (path: string, method: string) =>
-	PlatformError.systemError({
-		_tag: 'NotFound',
-		module: 'FileSystem',
-		method,
-		description: 'No such file or directory',
-		pathOrDescriptor: path
-	});
-
-const hasEntry = (files: ReadonlyMap<string, string>, path: string): boolean =>
-	files.has(path) || Array.from(files.keys()).some((key) => key.startsWith(`${path}/`));
-
-const readDirectoryEntries = (
-	files: ReadonlyMap<string, string>,
-	dirPath: string
-): ReadonlyArray<string> => {
-	const prefix = `${dirPath}/`;
-	const entries = new Set<string>();
-
-	for (const filePath of files.keys()) {
-		if (!filePath.startsWith(prefix)) continue;
-		const remainder = filePath.slice(prefix.length);
-		const slashIndex = remainder.indexOf('/');
-		entries.add(slashIndex === -1 ? remainder : remainder.slice(0, slashIndex));
-	}
-
-	return Array.from(entries).sort();
-};
-
-const makeFileSystemLayer = (
-	files: ReadonlyMap<string, string>
-): Layer.Layer<FileSystem.FileSystem | Path.Path> =>
-	Layer.mergeAll(
-		FileSystem.layerNoop({
-			exists: (path: string) => Effect.succeed(hasEntry(files, path)),
-			readFileString: (path: string) => {
-				const content = files.get(path);
-				return content === undefined
-					? Effect.fail(notFoundError(path, 'readFileString'))
-					: Effect.succeed(content);
-			},
-			readDirectory: (path: string) =>
-				hasEntry(files, path)
-					? Effect.succeed([...readDirectoryEntries(files, path)])
-					: Effect.fail(notFoundError(path, 'readDirectory'))
-		}),
-		Path.layer
-	);
 
 const fsWith = (
 	entries: ReadonlyArray<readonly [string, string]>
@@ -101,7 +49,7 @@ describe('Plugin.scan', () => {
 			});
 		}).pipe(
 			Effect.provide(
-				makeFileSystemLayer(
+				Testing.makeMockFileSystem(
 					fsWith([
 						[
 							'/plugin/.claude-plugin/plugin.json',
@@ -140,6 +88,7 @@ describe('Plugin.scan', () => {
 						]
 					])
 				)
+				.layer
 			)
 		)
 	);
@@ -160,7 +109,7 @@ describe('Plugin.load', () => {
 			expect(Option.isSome(loaded.mcpConfig)).toBe(true);
 		}).pipe(
 			Effect.provide(
-				makeFileSystemLayer(
+				Testing.makeMockFileSystem(
 					fsWith([
 						[
 							'/plugin/.claude-plugin/plugin.json',
@@ -196,6 +145,7 @@ describe('Plugin.load', () => {
 						]
 					])
 				)
+				.layer
 			)
 		)
 	);
@@ -210,7 +160,7 @@ describe('Plugin.load', () => {
 			});
 		}).pipe(
 			Effect.provide(
-				makeFileSystemLayer(
+				Testing.makeMockFileSystem(
 					fsWith([
 						[
 							'/plugin/skills/greet/SKILL.md',
@@ -218,6 +168,7 @@ describe('Plugin.load', () => {
 						]
 					])
 				)
+				.layer
 			)
 		)
 	);

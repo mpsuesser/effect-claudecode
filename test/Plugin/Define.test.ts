@@ -12,70 +12,13 @@
  */
 import { describe, expect, it } from '@effect/vitest';
 import * as Effect from 'effect/Effect';
-import * as FileSystem from 'effect/FileSystem';
-import * as Layer from 'effect/Layer';
 import * as Option from 'effect/Option';
-import * as Path from 'effect/Path';
-import * as PlatformError from 'effect/PlatformError';
 
 import { PluginWriteError } from '../../src/Errors.ts';
 import * as Define from '../../src/Plugin/Define.ts';
 import { McpJsonFile } from '../../src/Mcp/JsonFile.ts';
 import { PluginManifest } from '../../src/Plugin/Manifest.ts';
-
-// ---------------------------------------------------------------------------
-// Capture harness
-// ---------------------------------------------------------------------------
-
-interface WriteCapture {
-	readonly writes: Map<string, string>;
-	readonly dirs: Set<string>;
-	readonly layer: Layer.Layer<FileSystem.FileSystem | Path.Path>;
-}
-
-const permissionDeniedError = (path: string) =>
-	PlatformError.systemError({
-		_tag: 'PermissionDenied',
-		module: 'FileSystem',
-		method: 'writeFileString',
-		description: 'Permission denied',
-		pathOrDescriptor: path
-	});
-
-/**
- * Build a test layer whose `writeFileString` / `makeDirectory`
- * methods record into a shared `Map`/`Set`. When `failOn` is
- * provided, calls whose path matches are rejected with a fake
- * `PermissionDenied` error so error paths can be exercised.
- */
-const makeCapture = (options?: {
-	readonly failOn?: (path: string) => boolean;
-}): WriteCapture => {
-	const writes = new Map<string, string>();
-	const dirs = new Set<string>();
-	const shouldFail = options?.failOn ?? (() => false);
-
-	const fsLayer = FileSystem.layerNoop({
-		writeFileString: (path: string, content: string) =>
-			shouldFail(path)
-				? Effect.fail(permissionDeniedError(path))
-				: Effect.sync(() => {
-						writes.set(path, content);
-					}),
-		makeDirectory: (path: string) =>
-			shouldFail(path)
-				? Effect.fail(permissionDeniedError(path))
-				: Effect.sync(() => {
-						dirs.add(path);
-					})
-	});
-
-	return {
-		writes,
-		dirs,
-		layer: Layer.mergeAll(fsLayer, Path.layer)
-	};
-};
+import * as Testing from '../../src/Testing.ts';
 
 // ---------------------------------------------------------------------------
 // Plugin.define — synchronous builder
@@ -160,7 +103,6 @@ describe('Plugin.define', () => {
 describe('Plugin.write — directory layout', () => {
 	it.effect('writes .claude-plugin/plugin.json as pretty JSON', () =>
 		Effect.gen(function* () {
-			const capture = makeCapture();
 			const def = Define.define({
 				manifest: {
 					name: 'my-plugin',
@@ -168,10 +110,11 @@ describe('Plugin.write — directory layout', () => {
 					description: 'A test plugin'
 				}
 			});
-			yield* Define.write(def, '/dest').pipe(Effect.provide(capture.layer));
+			const fileSystem = yield* Testing.writePluginToMemory(def, '/dest');
+			const snapshot = fileSystem.snapshot();
 
-			expect(capture.dirs.has('/dest/.claude-plugin')).toBe(true);
-			const manifestContent = capture.writes.get(
+			expect(snapshot.directories).toContain('/dest/.claude-plugin');
+			const manifestContent = snapshot.files.get(
 				'/dest/.claude-plugin/plugin.json'
 			);
 			expect(manifestContent).toBeDefined();
@@ -183,7 +126,6 @@ describe('Plugin.write — directory layout', () => {
 
 	it.effect('writes commands/<name>.md entries under the commands dir', () =>
 		Effect.gen(function* () {
-			const capture = makeCapture();
 			const def = Define.define({
 				manifest: { name: 'p' },
 				commands: [
@@ -199,16 +141,17 @@ describe('Plugin.write — directory layout', () => {
 					})
 				]
 			});
-			yield* Define.write(def, '/dest').pipe(Effect.provide(capture.layer));
+			const fileSystem = yield* Testing.writePluginToMemory(def, '/dest');
+			const snapshot = fileSystem.snapshot();
 
-			expect(capture.dirs.has('/dest/commands')).toBe(true);
-			expect(capture.writes.get('/dest/commands/greet.md')).toContain(
+			expect(snapshot.directories).toContain('/dest/commands');
+			expect(snapshot.files.get('/dest/commands/greet.md')).toContain(
 				'description: Say hi'
 			);
-			expect(capture.writes.get('/dest/commands/greet.md')).toContain(
+			expect(snapshot.files.get('/dest/commands/greet.md')).toContain(
 				'# /greet'
 			);
-			expect(capture.writes.get('/dest/commands/ship.md')).toContain(
+			expect(snapshot.files.get('/dest/commands/ship.md')).toContain(
 				'description: Ship it'
 			);
 		})
@@ -216,7 +159,6 @@ describe('Plugin.write — directory layout', () => {
 
 	it.effect('writes agents/<name>.md entries under the agents dir', () =>
 		Effect.gen(function* () {
-			const capture = makeCapture();
 			const def = Define.define({
 				manifest: { name: 'p' },
 				agents: [
@@ -227,13 +169,14 @@ describe('Plugin.write — directory layout', () => {
 					})
 				]
 			});
-			yield* Define.write(def, '/dest').pipe(Effect.provide(capture.layer));
+			const fileSystem = yield* Testing.writePluginToMemory(def, '/dest');
+			const snapshot = fileSystem.snapshot();
 
-			expect(capture.dirs.has('/dest/agents')).toBe(true);
-			expect(capture.writes.get('/dest/agents/reviewer.md')).toContain(
+			expect(snapshot.directories).toContain('/dest/agents');
+			expect(snapshot.files.get('/dest/agents/reviewer.md')).toContain(
 				'name: reviewer'
 			);
-			expect(capture.writes.get('/dest/agents/reviewer.md')).toContain(
+			expect(snapshot.files.get('/dest/agents/reviewer.md')).toContain(
 				'# reviewer'
 			);
 		})
@@ -241,7 +184,6 @@ describe('Plugin.write — directory layout', () => {
 
 	it.effect('writes skills as skills/<name>/SKILL.md with nested dirs', () =>
 		Effect.gen(function* () {
-			const capture = makeCapture();
 			const def = Define.define({
 				manifest: { name: 'p' },
 				skills: [
@@ -257,23 +199,23 @@ describe('Plugin.write — directory layout', () => {
 					})
 				]
 			});
-			yield* Define.write(def, '/dest').pipe(Effect.provide(capture.layer));
+			const fileSystem = yield* Testing.writePluginToMemory(def, '/dest');
+			const snapshot = fileSystem.snapshot();
 
-			expect(capture.dirs.has('/dest/skills')).toBe(true);
-			expect(capture.dirs.has('/dest/skills/pdf-processor')).toBe(true);
-			expect(capture.dirs.has('/dest/skills/code-reviewer')).toBe(true);
-			expect(
-				capture.writes.get('/dest/skills/pdf-processor/SKILL.md')
-			).toContain('name: pdf-processor');
-			expect(
-				capture.writes.get('/dest/skills/code-reviewer/SKILL.md')
-			).toContain('name: code-reviewer');
+			expect(snapshot.directories).toContain('/dest/skills');
+			expect(snapshot.directories).toContain('/dest/skills/pdf-processor');
+			expect(snapshot.directories).toContain('/dest/skills/code-reviewer');
+			expect(snapshot.files.get('/dest/skills/pdf-processor/SKILL.md')).toContain(
+				'name: pdf-processor'
+			);
+			expect(snapshot.files.get('/dest/skills/code-reviewer/SKILL.md')).toContain(
+				'name: code-reviewer'
+			);
 		})
 	);
 
 	it.effect('writes output-styles/<name>.md entries', () =>
 		Effect.gen(function* () {
-			const capture = makeCapture();
 			const def = Define.define({
 				manifest: { name: 'p' },
 				outputStyles: [
@@ -284,10 +226,11 @@ describe('Plugin.write — directory layout', () => {
 					})
 				]
 			});
-			yield* Define.write(def, '/dest').pipe(Effect.provide(capture.layer));
+			const fileSystem = yield* Testing.writePluginToMemory(def, '/dest');
+			const snapshot = fileSystem.snapshot();
 
-			expect(capture.dirs.has('/dest/output-styles')).toBe(true);
-			expect(capture.writes.get('/dest/output-styles/terse.md')).toContain(
+			expect(snapshot.directories).toContain('/dest/output-styles');
+			expect(snapshot.files.get('/dest/output-styles/terse.md')).toContain(
 				'name: terse'
 			);
 		})
@@ -295,7 +238,6 @@ describe('Plugin.write — directory layout', () => {
 
 	it.effect('writes hooks/hooks.json only when hooksConfig is provided', () =>
 		Effect.gen(function* () {
-			const capture = makeCapture();
 			const def = Define.define({
 				manifest: { name: 'p' },
 				hooksConfig: {
@@ -307,10 +249,11 @@ describe('Plugin.write — directory layout', () => {
 					]
 				}
 			});
-			yield* Define.write(def, '/dest').pipe(Effect.provide(capture.layer));
+			const fileSystem = yield* Testing.writePluginToMemory(def, '/dest');
+			const snapshot = fileSystem.snapshot();
 
-			expect(capture.dirs.has('/dest/hooks')).toBe(true);
-			const hooksContent = capture.writes.get('/dest/hooks/hooks.json');
+			expect(snapshot.directories).toContain('/dest/hooks');
+			const hooksContent = snapshot.files.get('/dest/hooks/hooks.json');
 			expect(hooksContent).toBeDefined();
 			expect(hooksContent).toContain('"PostToolUse"');
 			expect(hooksContent).toContain('"command": "./fmt.sh"');
@@ -319,7 +262,6 @@ describe('Plugin.write — directory layout', () => {
 
 	it.effect('writes .mcp.json only when mcpConfig is provided', () =>
 		Effect.gen(function* () {
-			const capture = makeCapture();
 			const def = Define.define({
 				manifest: { name: 'p' },
 				mcpConfig: {
@@ -328,9 +270,10 @@ describe('Plugin.write — directory layout', () => {
 					}
 				}
 			});
-			yield* Define.write(def, '/dest').pipe(Effect.provide(capture.layer));
+			const fileSystem = yield* Testing.writePluginToMemory(def, '/dest');
+			const snapshot = fileSystem.snapshot();
 
-			const mcpContent = capture.writes.get('/dest/.mcp.json');
+			const mcpContent = snapshot.files.get('/dest/.mcp.json');
 			expect(mcpContent).toBeDefined();
 			expect(mcpContent).toContain('"mcpServers"');
 			expect(mcpContent).toContain('"mcp-fs"');
@@ -339,17 +282,17 @@ describe('Plugin.write — directory layout', () => {
 
 	it.effect('skips empty component directories entirely', () =>
 		Effect.gen(function* () {
-			const capture = makeCapture();
 			const def = Define.define({ manifest: { name: 'p' } });
-			yield* Define.write(def, '/dest').pipe(Effect.provide(capture.layer));
+			const fileSystem = yield* Testing.writePluginToMemory(def, '/dest');
+			const snapshot = fileSystem.snapshot();
 
 			// Only the manifest dir is created; no commands/agents/skills/etc.
-			expect(capture.dirs.has('/dest/commands')).toBe(false);
-			expect(capture.dirs.has('/dest/agents')).toBe(false);
-			expect(capture.dirs.has('/dest/skills')).toBe(false);
-			expect(capture.dirs.has('/dest/output-styles')).toBe(false);
-			expect(capture.dirs.has('/dest/hooks')).toBe(false);
-			expect(capture.writes.has('/dest/.mcp.json')).toBe(false);
+			expect(snapshot.directories).not.toContain('/dest/commands');
+			expect(snapshot.directories).not.toContain('/dest/agents');
+			expect(snapshot.directories).not.toContain('/dest/skills');
+			expect(snapshot.directories).not.toContain('/dest/output-styles');
+			expect(snapshot.directories).not.toContain('/dest/hooks');
+			expect(snapshot.files.has('/dest/.mcp.json')).toBe(false);
 		})
 	);
 });
@@ -361,14 +304,18 @@ describe('Plugin.write — directory layout', () => {
 describe('Plugin.write — errors', () => {
 	it.effect('wraps FileSystem errors in PluginWriteError', () =>
 		Effect.gen(function* () {
-			const capture = makeCapture({
-				failOn: (path) =>
-					path === '/dest/.claude-plugin/plugin.json'
-			});
+			const fileSystem = Testing.makeMockFileSystem(
+				{},
+				{
+					failOn: (operation, path) =>
+						operation === 'writeFileString' &&
+						path === '/dest/.claude-plugin/plugin.json'
+				}
+			);
 			const def = Define.define({ manifest: { name: 'p' } });
 
 			const raised = yield* Effect.flip(
-				Define.write(def, '/dest').pipe(Effect.provide(capture.layer))
+				Define.write(def, '/dest').pipe(Effect.provide(fileSystem.layer))
 			);
 			expect(raised).toBeInstanceOf(PluginWriteError);
 			expect(raised).toMatchObject({
@@ -380,9 +327,14 @@ describe('Plugin.write — errors', () => {
 
 	it.effect('reports the first failing path when an entry write fails', () =>
 		Effect.gen(function* () {
-			const capture = makeCapture({
-				failOn: (path) => path === '/dest/commands/broken.md'
-			});
+			const fileSystem = Testing.makeMockFileSystem(
+				{},
+				{
+					failOn: (operation, path) =>
+						operation === 'writeFileString' &&
+						path === '/dest/commands/broken.md'
+				}
+			);
 			const def = Define.define({
 				manifest: { name: 'p' },
 				commands: [
@@ -395,7 +347,7 @@ describe('Plugin.write — errors', () => {
 			});
 
 			const raised = yield* Effect.flip(
-				Define.write(def, '/dest').pipe(Effect.provide(capture.layer))
+				Define.write(def, '/dest').pipe(Effect.provide(fileSystem.layer))
 			);
 			expect(raised).toMatchObject({
 				_tag: 'PluginWriteError',

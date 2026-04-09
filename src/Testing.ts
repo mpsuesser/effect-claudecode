@@ -13,6 +13,7 @@ import * as Exit from 'effect/Exit';
 import * as FileSystem from 'effect/FileSystem';
 import * as Layer from 'effect/Layer';
 import * as Option from 'effect/Option';
+import * as Path from 'effect/Path';
 import * as PlatformError from 'effect/PlatformError';
 import * as Schema from 'effect/Schema';
 import * as Sink from 'effect/Sink';
@@ -30,6 +31,7 @@ import {
 import { HookContext } from './Hook/Context.ts';
 import { HookEnvelope } from './Hook/Envelope.ts';
 import type * as Events from './Hook/Events/index.ts';
+import * as Plugin from './Plugin.ts';
 import {
 	runHookProgram,
 	type HookDefinition
@@ -102,35 +104,31 @@ export const makeMockStdioLayer = (options: {
 }) => {
 	const encoder = new TextEncoder();
 	const decoder = new TextDecoder();
+	const writeStdoutChunk = (chunk: string | Uint8Array) =>
+		Effect.sync(() => {
+			options.stdoutBuffer.push(
+				typeof chunk === 'string' ? chunk : decoder.decode(chunk)
+			);
+		});
+	const writeStderrChunk = (chunk: string | Uint8Array) =>
+		Effect.sync(() => {
+			const buf = options.stderrBuffer;
+			if (buf !== undefined) {
+				buf.push(typeof chunk === 'string' ? chunk : decoder.decode(chunk));
+			}
+		});
 	const stdoutSink = (): Sink.Sink<
 		void,
 		string | Uint8Array,
 		never,
 		never
-	> =>
-		Sink.forEach((chunk: string | Uint8Array) =>
-			Effect.sync(() => {
-				options.stdoutBuffer.push(
-					typeof chunk === 'string' ? chunk : decoder.decode(chunk)
-				);
-			})
-		);
+	> => Sink.forEach(writeStdoutChunk);
 	const stderrSink = (): Sink.Sink<
 		void,
 		string | Uint8Array,
 		never,
 		never
-	> =>
-		Sink.forEach((chunk: string | Uint8Array) =>
-			Effect.sync(() => {
-				const buf = options.stderrBuffer;
-				if (buf !== undefined) {
-					buf.push(
-						typeof chunk === 'string' ? chunk : decoder.decode(chunk)
-					);
-				}
-			})
-		);
+	> => Sink.forEach(writeStderrChunk);
 	return Stdio.layerTest({
 		stdin: Stream.make(encoder.encode(options.stdinJson)),
 		stdout: stdoutSink,
@@ -539,61 +537,468 @@ export const expectAddContext = (
 // Mock FileSystem
 // ---------------------------------------------------------------------------
 
-const notFoundError = (path: string) =>
+/**
+ * Operations that the mock file system can intercept.
+ *
+ * @category Mocks
+ * @since 0.1.0
+ */
+export type MockFileSystemOperation =
+	| 'exists'
+	| 'readFile'
+	| 'readFileString'
+	| 'writeFile'
+	| 'writeFileString'
+	| 'makeDirectory'
+	| 'readDirectory'
+	| 'remove';
+
+/**
+ * Options for the in-memory file system harness.
+ *
+ * @category Mocks
+ * @since 0.1.0
+ */
+export interface MockFileSystemOptions {
+	readonly failOn?: (
+		operation: MockFileSystemOperation,
+		path: string
+	) => boolean;
+}
+
+/**
+ * Deterministic snapshot of the mock file system state.
+ *
+ * @category Mocks
+ * @since 0.1.0
+ */
+export interface MockFileSystemSnapshot {
+	readonly files: ReadonlyMap<string, string>;
+	readonly directories: ReadonlyArray<string>;
+}
+
+/**
+ * Stateful in-memory file system harness used by tests.
+ *
+ * @category Mocks
+ * @since 0.1.0
+ */
+export interface MockFileSystem {
+	readonly layer: Layer.Layer<FileSystem.FileSystem | Path.Path>;
+	readonly snapshot: () => MockFileSystemSnapshot;
+	readonly readFile: (path: string) => string | undefined;
+	readonly exists: (path: string) => boolean;
+}
+
+type MockFileEntries = ReadonlyMap<string, string> | Record<string, string>;
+
+const textEncoder = new TextEncoder();
+
+const normalizeDirectoryPath = (path: string): string => {
+	if (path === '/') {
+		return '/';
+	}
+	const normalized = path.replace(/\/+$/, '');
+	return normalized.length === 0 ? '/' : normalized;
+};
+
+const parentDirectory = (path: string): string => {
+	const normalized = normalizeDirectoryPath(path);
+	if (normalized === '/') {
+		return '/';
+	}
+	const slashIndex = normalized.lastIndexOf('/');
+	return slashIndex <= 0 ? '/' : normalized.slice(0, slashIndex);
+};
+
+const ancestorDirectories = (path: string): ReadonlyArray<string> => {
+	const normalized = normalizeDirectoryPath(path);
+	if (normalized === '/') {
+		return ['/'];
+	}
+
+	const segments = normalized.split('/').filter((segment) => segment.length > 0);
+	const directories = ['/'];
+	let current = '';
+
+	for (const segment of segments) {
+		current = `${current}/${segment}`;
+		directories.push(current);
+	}
+
+	return directories;
+};
+
+const toFileMap = (files?: MockFileEntries): Map<string, string> =>
+	files === undefined
+		? new Map()
+		: files instanceof Map
+			? new Map(files)
+			: new Map(Object.entries(files));
+
+const permissionDeniedError = (
+	path: string,
+	method: MockFileSystemOperation
+) =>
+	PlatformError.systemError({
+		_tag: 'PermissionDenied',
+		module: 'FileSystem',
+		method,
+		description: 'Permission denied',
+		pathOrDescriptor: path
+	});
+
+const notFoundError = (
+	path: string,
+	method: MockFileSystemOperation
+) =>
 	PlatformError.systemError({
 		_tag: 'NotFound',
 		module: 'FileSystem',
-		method: 'readFileString',
+		method,
 		description: 'No such file or directory',
 		pathOrDescriptor: path
 	});
 
+const directoryNotEmptyError = (path: string) =>
+	PlatformError.systemError({
+		_tag: 'BadResource',
+		module: 'FileSystem',
+		method: 'remove',
+		description: 'Directory not empty',
+		pathOrDescriptor: path
+	});
+
+const ensureInitialDirectories = (files: Map<string, string>): Set<string> => {
+	const directories = new Set<string>(['/']);
+	for (const filePath of files.keys()) {
+		for (const directory of ancestorDirectories(parentDirectory(filePath))) {
+			directories.add(directory);
+		}
+	}
+	return directories;
+};
+
+const hasEntry = (
+	files: ReadonlyMap<string, string>,
+	directories: ReadonlySet<string>,
+	path: string
+): boolean => files.has(path) || directories.has(normalizeDirectoryPath(path));
+
+const directDirectoryEntries = (
+	files: ReadonlyMap<string, string>,
+	directories: ReadonlySet<string>,
+	dirPath: string
+): ReadonlyArray<string> => {
+	const normalized = normalizeDirectoryPath(dirPath);
+	const prefix = normalized === '/' ? '/' : `${normalized}/`;
+	const entries = new Set<string>();
+
+	for (const filePath of files.keys()) {
+		if (!filePath.startsWith(prefix)) continue;
+		const remainder = filePath.slice(prefix.length);
+		const slashIndex = remainder.indexOf('/');
+		entries.add(slashIndex === -1 ? remainder : remainder.slice(0, slashIndex));
+	}
+
+	for (const directoryPath of directories) {
+		if (directoryPath === normalized || !directoryPath.startsWith(prefix)) continue;
+		const remainder = directoryPath.slice(prefix.length);
+		if (remainder.length === 0) continue;
+		const slashIndex = remainder.indexOf('/');
+		entries.add(slashIndex === -1 ? remainder : remainder.slice(0, slashIndex));
+	}
+
+	return Array.from(entries)
+		.filter((entry) => entry.length > 0)
+		.sort();
+};
+
+const recursiveDirectoryEntries = (
+	files: ReadonlyMap<string, string>,
+	directories: ReadonlySet<string>,
+	dirPath: string
+): ReadonlyArray<string> => {
+	const normalized = normalizeDirectoryPath(dirPath);
+	const prefix = normalized === '/' ? '/' : `${normalized}/`;
+	const entries = new Set<string>();
+
+	for (const filePath of files.keys()) {
+		if (filePath.startsWith(prefix)) {
+			const remainder = filePath.slice(prefix.length);
+			if (remainder.length > 0) {
+				entries.add(remainder);
+			}
+		}
+	}
+
+	for (const directoryPath of directories) {
+		if (directoryPath === normalized || !directoryPath.startsWith(prefix)) continue;
+		const remainder = directoryPath.slice(prefix.length);
+		if (remainder.length > 0) {
+			entries.add(remainder);
+		}
+	}
+
+	return Array.from(entries).sort();
+};
+
 /**
- * Build a `Layer<FileSystem>` backed by an in-memory map of
- * absolute paths to file contents. Paths not in the map are
- * reported as non-existent (and `readFileString` fails with a
- * `NotFound` platform error).
+ * Build a stateful in-memory file system harness with a ready-to-provide
+ * `FileSystem` + `Path` layer and snapshot helpers for assertions.
  *
- * Useful for testing `Settings.load`, `Frontmatter.parseFile`,
- * `Mcp.loadJson`, `Hook.readTranscript`, and any other code path
- * that reads files through the `FileSystem` service.
+ * Unlike the earlier read-only helper, this harness supports directory
+ * listings and writes, so it can exercise `Plugin.write`, `Plugin.scan`,
+ * `Plugin.load`, `Settings.load`, frontmatter parsing, transcript reads, and
+ * install/sync flows against one consistent in-memory project tree.
  *
  * @category Mocks
  * @since 0.1.0
- * @example
- * ```ts
- * import { describe, it } from '@effect/vitest'
- * import * as Effect from 'effect/Effect'
- * import { Settings, Testing } from 'effect-claudecode'
- *
- * it.effect('loads settings', () =>
- *   Effect.gen(function* () {
- *     const settings = yield* Settings.load('/repo')
- *     // ...
- *   }).pipe(
- *     Effect.provide(
- *       Testing.makeMockFileSystem({
- *         '/repo/.claude/settings.json': '{"model":"claude-opus-4-6"}'
- *       })
- *     )
- *   )
- * )
- * ```
  */
 export const makeMockFileSystem = (
-	files: ReadonlyMap<string, string> | Record<string, string>
-): Layer.Layer<FileSystem.FileSystem> => {
-	const fileMap =
-		files instanceof Map
-			? files
-			: new Map(Object.entries(files));
-	return FileSystem.layerNoop({
-		exists: (path: string) => Effect.succeed(fileMap.has(path)),
-		readFileString: (path: string) => {
-			const content = fileMap.get(path);
-			return content === undefined
-				? Effect.fail(notFoundError(path))
-				: Effect.succeed(content);
-		}
-	});
+	files?: MockFileEntries,
+	options?: MockFileSystemOptions
+): MockFileSystem => {
+	const fileMap = toFileMap(files);
+	const directories = ensureInitialDirectories(fileMap);
+	const shouldFail = options?.failOn ?? (() => false);
+
+	const failIfRequested = (operation: MockFileSystemOperation, path: string) =>
+		shouldFail(operation, path)
+			? Option.some(permissionDeniedError(path, operation))
+			: Option.none();
+
+	const layer = Layer.mergeAll(
+		FileSystem.layerNoop({
+			exists: (path: string) => {
+				const failure = failIfRequested('exists', path);
+				return Option.isSome(failure)
+					? Effect.fail(failure.value)
+					: Effect.succeed(hasEntry(fileMap, directories, path));
+			},
+			readFileString: (path: string) => {
+				const failure = failIfRequested('readFileString', path);
+				if (Option.isSome(failure)) {
+					return Effect.fail(failure.value);
+				}
+				const content = fileMap.get(path);
+				return content === undefined
+					? Effect.fail(notFoundError(path, 'readFileString'))
+					: Effect.succeed(content);
+			},
+			readFile: (path: string) => {
+				const failure = failIfRequested('readFile', path);
+				if (Option.isSome(failure)) {
+					return Effect.fail(failure.value);
+				}
+				const content = fileMap.get(path);
+				return content === undefined
+					? Effect.fail(notFoundError(path, 'readFile'))
+					: Effect.succeed(textEncoder.encode(content));
+			},
+			writeFileString: (path: string, content: string) => {
+				const failure = failIfRequested('writeFileString', path);
+				if (Option.isSome(failure)) {
+					return Effect.fail(failure.value);
+				}
+				const directory = parentDirectory(path);
+				if (!directories.has(directory)) {
+					return Effect.fail(notFoundError(path, 'writeFileString'));
+				}
+				return Effect.sync(() => {
+					fileMap.set(path, content);
+				});
+			},
+			writeFile: (path: string, data: Uint8Array) => {
+				const failure = failIfRequested('writeFile', path);
+				if (Option.isSome(failure)) {
+					return Effect.fail(failure.value);
+				}
+				const directory = parentDirectory(path);
+				if (!directories.has(directory)) {
+					return Effect.fail(notFoundError(path, 'writeFile'));
+				}
+				return Effect.sync(() => {
+					fileMap.set(path, new TextDecoder().decode(data));
+				});
+			},
+			makeDirectory: (path: string, makeOptions) => {
+				const failure = failIfRequested('makeDirectory', path);
+				if (Option.isSome(failure)) {
+					return Effect.fail(failure.value);
+				}
+				const normalized = normalizeDirectoryPath(path);
+				const recursive = makeOptions?.recursive ?? false;
+				if (!recursive && !directories.has(parentDirectory(normalized))) {
+					return Effect.fail(notFoundError(path, 'makeDirectory'));
+				}
+				return Effect.sync(() => {
+					for (const directory of recursive
+						? ancestorDirectories(normalized)
+						: [normalized]) {
+						directories.add(directory);
+					}
+				});
+			},
+			readDirectory: (path: string, readOptions) => {
+				const failure = failIfRequested('readDirectory', path);
+				if (Option.isSome(failure)) {
+					return Effect.fail(failure.value);
+				}
+				const normalized = normalizeDirectoryPath(path);
+				if (!directories.has(normalized)) {
+					return Effect.fail(notFoundError(path, 'readDirectory'));
+				}
+				return Effect.succeed(
+					readOptions?.recursive
+						? [...recursiveDirectoryEntries(fileMap, directories, normalized)]
+						: [...directDirectoryEntries(fileMap, directories, normalized)]
+				);
+			},
+			remove: (path: string, removeOptions) => {
+				const failure = failIfRequested('remove', path);
+				if (Option.isSome(failure)) {
+					return Effect.fail(failure.value);
+				}
+				const normalized = normalizeDirectoryPath(path);
+				const recursive = removeOptions?.recursive ?? false;
+				const force = removeOptions?.force ?? false;
+
+				if (fileMap.has(path)) {
+					return Effect.sync(() => {
+						fileMap.delete(path);
+					});
+				}
+
+				if (!directories.has(normalized)) {
+					return force
+						? Effect.void
+						: Effect.fail(notFoundError(path, 'remove'));
+				}
+
+				const descendants = Array.from(fileMap.keys()).filter((filePath) =>
+					filePath.startsWith(`${normalized}/`)
+				);
+				const descendantDirectories = Array.from(directories).filter(
+					(directoryPath) =>
+						directoryPath !== normalized &&
+						directoryPath.startsWith(`${normalized}/`)
+				);
+
+				if (!recursive && (descendants.length > 0 || descendantDirectories.length > 0)) {
+					return Effect.fail(directoryNotEmptyError(path));
+				}
+
+				return Effect.sync(() => {
+					for (const filePath of descendants) {
+						fileMap.delete(filePath);
+					}
+					for (const directoryPath of descendantDirectories) {
+						directories.delete(directoryPath);
+					}
+					directories.delete(normalized);
+				});
+			}
+		}),
+		Path.layer
+	);
+
+	return {
+		layer,
+		snapshot: () => ({
+			files: new Map(
+				Array.from(fileMap.entries()).sort(([left], [right]) =>
+					left.localeCompare(right)
+				)
+			),
+			directories: Array.from(directories).sort()
+		}),
+		readFile: (path: string) => fileMap.get(path),
+		exists: (path: string) => hasEntry(fileMap, directories, path)
+	};
 };
+
+/**
+ * Assert that a written plugin tree matches the expected file set exactly.
+ *
+ * String expectations must match exactly. `RegExp` expectations must match the
+ * full file content via `expect(...).toMatch(...)`.
+ *
+ * @category Assertions
+ * @since 0.1.0
+ */
+export const expectPluginTree = (
+	input: MockFileSystem | MockFileSystemSnapshot,
+	expected: Readonly<Record<string, string | RegExp>>
+): void => {
+	const snapshot = 'layer' in input ? input.snapshot() : input;
+	const actualPaths = Array.from(snapshot.files.keys()).sort();
+	const expectedPaths = Object.keys(expected).sort();
+
+	expect(actualPaths).toEqual(expectedPaths);
+
+	for (const path of expectedPaths) {
+		const actual = snapshot.files.get(path);
+		expect(actual).toBeDefined();
+		const matcher = expected[path];
+		if (matcher instanceof RegExp) {
+			expect(actual).toMatch(matcher);
+		} else {
+			expect(actual).toBe(matcher);
+		}
+	}
+};
+
+/**
+ * Write a plugin definition into an in-memory file system harness and return
+ * the harness for further assertions or round-trip loading.
+ *
+ * @category Runner
+ * @since 0.1.0
+ */
+export const writePluginToMemory = (
+	definition: Plugin.PluginDefinition,
+	destDir = '/plugin',
+	options?: MockFileSystemOptions
+): Effect.Effect<MockFileSystem, import('./Errors.ts').PluginWriteError> =>
+	Effect.gen(function* () {
+		const fileSystem = makeMockFileSystem(undefined, options);
+		yield* Plugin.write(definition, destDir).pipe(
+			Effect.provide(fileSystem.layer)
+		);
+		return fileSystem;
+	});
+
+/**
+ * Result of writing a plugin to an in-memory file system and loading it back.
+ *
+ * @category Runner
+ * @since 0.1.0
+ */
+export interface PluginRoundTripResult {
+	readonly fileSystem: MockFileSystem;
+	readonly loaded: Plugin.LoadedPlugin;
+}
+
+/**
+ * Round-trip a plugin definition through `Plugin.write` and `Plugin.load`
+ * without touching disk.
+ *
+ * @category Runner
+ * @since 0.1.0
+ */
+export const roundTripPlugin = (
+	definition: Plugin.PluginDefinition,
+	destDir = '/plugin',
+	options?: MockFileSystemOptions
+): Effect.Effect<
+	PluginRoundTripResult,
+	import('./Errors.ts').PluginWriteError | import('./Errors.ts').PluginLoadError
+> =>
+	Effect.gen(function* () {
+		const fileSystem = yield* writePluginToMemory(definition, destDir, options);
+		const loaded = yield* Plugin.load(destDir).pipe(
+			Effect.provide(fileSystem.layer)
+		);
+		return { fileSystem, loaded };
+	});
