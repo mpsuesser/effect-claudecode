@@ -93,14 +93,19 @@ type RunnerError =
  */
 const readStdin: Effect.Effect<string, HookStdinReadError, Stdio.Stdio> =
 	Effect.gen(function* () {
+		yield* Effect.logDebug('reading hook stdin');
 		const stdio = yield* Stdio.Stdio;
 		const chunks = yield* Stream.runCollect(
 			Stream.decodeText(stdio.stdin)
 		).pipe(
 			Effect.mapError((cause) => new HookStdinReadError({ cause }))
 		);
-		return Array.from(chunks).join('');
-	});
+		const raw = Array.from(chunks).join('');
+		yield* Effect.logDebug('read hook stdin').pipe(
+			Effect.annotateLogs({ byteLength: raw.length })
+		);
+		return raw;
+	}).pipe(Effect.withLogSpan('Hook.readStdin'));
 
 /**
  * Write a single JSON line to stdout.
@@ -111,11 +116,14 @@ const writeStdout = (
 	json: string
 ): Effect.Effect<void, HookStdoutWriteError, Stdio.Stdio> =>
 	Effect.gen(function* () {
+		yield* Effect.logDebug('writing hook stdout').pipe(
+			Effect.annotateLogs({ byteLength: json.length })
+		);
 		const stdio = yield* Stdio.Stdio;
 		yield* Stream.run(Stream.make(json + '\n'), stdio.stdout()).pipe(
 			Effect.mapError((cause) => new HookStdoutWriteError({ cause }))
 		);
-	});
+	}).pipe(Effect.withLogSpan('Hook.writeStdout'));
 
 // ---------------------------------------------------------------------------
 // Per-hook execution
@@ -134,6 +142,9 @@ const runHookFromParsed = <In extends HookEnvelope, Out>(
 	parsed: unknown
 ): Effect.Effect<void, RunnerError, Stdio.Stdio> =>
 	Effect.gen(function* () {
+		yield* Effect.logDebug('decoding hook input').pipe(
+			Effect.annotateLogs({ expectedEvent: hook.event })
+		);
 		const input = yield* Schema.decodeUnknownEffect(hook.inputSchema)(
 			parsed
 		).pipe(
@@ -144,6 +155,10 @@ const runHookFromParsed = <In extends HookEnvelope, Out>(
 						phase: 'schema' as const
 					})
 			)
+		);
+		yield* Effect.annotateCurrentSpan('hook.event', input.hook_event_name);
+		yield* Effect.logDebug('running hook handler').pipe(
+			Effect.annotateLogs({ hookEventName: input.hook_event_name })
 		);
 		const envelope = HookEnvelope.makeUnsafe({
 			session_id: input.session_id,
@@ -158,13 +173,16 @@ const runHookFromParsed = <In extends HookEnvelope, Out>(
 			Effect.provide(HookContext.layer(envelope)),
 			Effect.mapError((cause) => new HookHandlerError({ cause }))
 		);
+		yield* Effect.logDebug('encoding hook output').pipe(
+			Effect.annotateLogs({ hookEventName: input.hook_event_name })
+		);
 		const encoded = yield* Schema.encodeUnknownEffect(
 			Schema.fromJsonString(hook.outputSchema)
 		)(output).pipe(
 			Effect.mapError((cause) => new HookOutputEncodeError({ cause }))
 		);
 		yield* writeStdout(encoded);
-	});
+	}).pipe(Effect.withLogSpan('Hook.runHookFromParsed'));
 
 // ---------------------------------------------------------------------------
 // Runner programs
@@ -183,6 +201,9 @@ export const runHookProgram = <In extends HookEnvelope, Out>(
 	hook: HookDefinition<In, Out>
 ): Effect.Effect<void, RunnerError, Stdio.Stdio> =>
 	Effect.gen(function* () {
+		yield* Effect.logDebug('starting single hook runner').pipe(
+			Effect.annotateLogs({ hookEventName: hook.event })
+		);
 		const raw = yield* readStdin;
 		const parsed = yield* Schema.decodeUnknownEffect(
 			Schema.UnknownFromJsonString
@@ -193,7 +214,7 @@ export const runHookProgram = <In extends HookEnvelope, Out>(
 			)
 		);
 		yield* runHookFromParsed(hook, parsed);
-	});
+	}).pipe(Effect.withLogSpan('Hook.runHookProgram'));
 
 /**
  * Build the Effect program that reads stdin, peeks `hook_event_name`,
@@ -207,6 +228,9 @@ export const runDispatchProgram = (
 	hooks: DispatchMap
 ): Effect.Effect<void, RunnerError, Stdio.Stdio> =>
 	Effect.gen(function* () {
+		yield* Effect.logDebug('starting hook dispatch runner').pipe(
+			Effect.annotateLogs({ registeredHandlers: Object.keys(hooks).length })
+		);
 		const raw = yield* readStdin;
 		const parsed = yield* Schema.decodeUnknownEffect(
 			Schema.UnknownFromJsonString
@@ -227,10 +251,16 @@ export const runDispatchProgram = (
 					})
 			)
 		);
+		yield* Effect.annotateCurrentSpan('hook.event', envelope.hook_event_name);
 		const hook = hooks[envelope.hook_event_name];
-		if (hook === undefined) return;
+		if (hook === undefined) {
+			yield* Effect.logDebug('no registered hook handler for event').pipe(
+				Effect.annotateLogs({ hookEventName: envelope.hook_event_name })
+			);
+			return;
+		}
 		yield* runHookFromParsed(hook, parsed);
-	});
+	}).pipe(Effect.withLogSpan('Hook.runDispatchProgram'));
 
 // ---------------------------------------------------------------------------
 // Teardown: Effect Exit → OS exit code

@@ -1,0 +1,12 @@
+AGENTS.md
+.claude/
+.references/
+examples/
+node_modules/
+test/
+vitest.config.ts
+vitest.setup.ts
+tsconfig.json
+tsconfig.build.json
+tsconfig.tsbuildinfo
+bun.lock

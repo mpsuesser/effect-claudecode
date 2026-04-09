@@ -135,14 +135,21 @@ export const parse = (
 	source: string,
 	path: string
 ): Effect.Effect<ParsedFrontmatter, FrontmatterParseError> =>
-	Effect.gen(function* () {
+	Effect.fn('Frontmatter.parse')(function* (source: string, path: string) {
+		yield* Effect.annotateCurrentSpan('frontmatter.path', path);
 		const split = splitFrontmatter(source);
 		if (split === undefined) {
+			yield* Effect.logDebug('markdown file has no frontmatter').pipe(
+				Effect.annotateLogs({ path })
+			);
 			return { frontmatter: undefined, body: source };
 		}
+		yield* Effect.logDebug('parsing markdown frontmatter').pipe(
+			Effect.annotateLogs({ path })
+		);
 		const frontmatter = yield* decodeYaml(path, split.yaml);
 		return { frontmatter, body: split.body };
-	});
+	})(source, path);
 
 /**
  * Read a markdown file from disk and parse its frontmatter. Requires
@@ -171,7 +178,11 @@ export const parseFile = (
 	FrontmatterReadError | FrontmatterParseError,
 	FileSystem.FileSystem
 > =>
-	Effect.gen(function* () {
+	Effect.fn('Frontmatter.parseFile')(function* (path: string) {
+		yield* Effect.annotateCurrentSpan('frontmatter.path', path);
+		yield* Effect.logDebug('reading markdown frontmatter file').pipe(
+			Effect.annotateLogs({ path })
+		);
 		const fs = yield* FileSystem.FileSystem;
 		const source = yield* fs
 			.readFileString(path)
@@ -181,4 +192,4 @@ export const parseFile = (
 				)
 			);
 		return yield* parse(source, path);
-	});
+	})(path);

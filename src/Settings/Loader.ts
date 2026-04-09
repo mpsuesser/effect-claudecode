@@ -188,7 +188,11 @@ export const load = (
 	| SettingsDecodeError,
 	FileSystem.FileSystem | Path.Path
 > =>
-	Effect.gen(function* () {
+	Effect.fn('Settings.load')(function* (cwd: string) {
+		yield* Effect.annotateCurrentSpan('settings.cwd', cwd);
+		yield* Effect.logDebug('loading Claude Code settings').pipe(
+			Effect.annotateLogs({ cwd })
+		);
 		const userPath = yield* userSettingsPath;
 		const projectPath = yield* projectSettingsPath(cwd);
 		const localPath = yield* localSettingsPath(cwd);
@@ -209,4 +213,4 @@ export const load = (
 		return Arr.reduce(decoded, emptySettings, (acc, maybe) =>
 			Option.isNone(maybe) ? acc : mergeSettings(acc, maybe.value)
 		);
-	});
+	})(cwd);

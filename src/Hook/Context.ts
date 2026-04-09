@@ -10,6 +10,7 @@
  */
 import * as Effect from 'effect/Effect';
 import * as Layer from 'effect/Layer';
+import * as Option from 'effect/Option';
 import * as ServiceMap from 'effect/ServiceMap';
 
 import type { HookEnvelope } from './Envelope.ts';
@@ -27,13 +28,13 @@ export namespace HookContext {
 	 * @category Service
 	 * @since 0.1.0
 	 */
-	export interface Interface {
-		readonly sessionId: string;
-		readonly transcriptPath: string;
-		readonly cwd: string;
-		readonly permissionMode: string | undefined;
-		readonly hookEventName: string;
-	}
+		export interface Interface {
+			readonly sessionId: string;
+			readonly transcriptPath: string;
+			readonly cwd: string;
+			readonly permissionMode: Option.Option<string>;
+			readonly hookEventName: string;
+		}
 
 	/**
 	 * The HookContext ServiceMap.Service tag.
@@ -55,7 +56,7 @@ export namespace HookContext {
 		sessionId: env.session_id,
 		transcriptPath: env.transcript_path,
 		cwd: env.cwd,
-		permissionMode: env.permission_mode,
+		permissionMode: Option.fromNullishOr(env.permission_mode),
 		hookEventName: env.hook_event_name
 	});
 
@@ -117,7 +118,7 @@ export const cwd: Effect.Effect<string, never, HookContext.Service> =
  * @since 0.1.0
  */
 export const permissionMode: Effect.Effect<
-	string | undefined,
+	Option.Option<string>,
 	never,
 	HookContext.Service
 > = Effect.service(HookContext.Service).pipe(

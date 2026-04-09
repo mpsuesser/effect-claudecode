@@ -74,7 +74,11 @@ export class McpJsonFile extends Schema.Class<McpJsonFile>('McpJsonFile')({
 export const loadJson = (
 	path: string
 ): Effect.Effect<McpJsonFile, McpConfigError, FileSystem.FileSystem> =>
-	Effect.gen(function* () {
+	Effect.fn('Mcp.loadJson')(function* (path: string) {
+		yield* Effect.annotateCurrentSpan('mcp.path', path);
+		yield* Effect.logDebug('loading MCP config').pipe(
+			Effect.annotateLogs({ path })
+		);
 		const fs = yield* FileSystem.FileSystem;
 		const raw = yield* fs
 			.readFileString(path)
@@ -91,4 +95,4 @@ export const loadJson = (
 		return yield* Schema.decodeUnknownEffect(McpJsonFile)(parsed).pipe(
 			Effect.mapError((cause) => new McpConfigError({ path, cause }))
 		);
-	});
+	})(path);

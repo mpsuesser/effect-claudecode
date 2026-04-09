@@ -12,6 +12,7 @@ import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import * as FileSystem from 'effect/FileSystem';
 import * as Layer from 'effect/Layer';
+import * as Option from 'effect/Option';
 import * as PlatformError from 'effect/PlatformError';
 import * as Schema from 'effect/Schema';
 import * as Sink from 'effect/Sink';
@@ -42,7 +43,7 @@ const defaultContext: HookContext.Interface = {
 	sessionId: 'test-session',
 	transcriptPath: '/tmp/transcript.jsonl',
 	cwd: '/tmp/workspace',
-	permissionMode: 'default',
+	permissionMode: Option.some('default'),
 	hookEventName: 'TestEvent'
 };
 

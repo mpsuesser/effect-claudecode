@@ -3,22 +3,49 @@
   "name": "effect-claudecode",
   "version": "0.0.1",
   "description": "Effect runtime and bindings around Claude Code plugin primitives — write Claude Code plugins in a maximally Effect-first way.",
-  "private": true,
+  "keywords": [
+    "claude",
+    "claude-code",
+    "effect",
+    "hooks",
+    "mcp",
+    "plugin",
+    "settings",
+    "skills",
+    "subagents"
+  ],
+  "homepage": "https://github.com/mpsuesser/effect-claudecode#readme",
+  "bugs": {
+    "url": "https://github.com/mpsuesser/effect-claudecode/issues"
+  },
+  "license": "MIT",
+  "author": "Marc Suesser",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mpsuesser/effect-claudecode.git"
+  },
   "type": "module",
   "files": [
-    "src",
+    "dist",
     "README.md",
     "LICENSE"
   ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     }
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "bun run build && bun run test && bun run typecheck",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "bun run check"
   },
+  "sideEffects": false,
   "devDependencies": {
     "@effect/platform-bun": "4.0.0-beta.43",
     "@effect/platform-node-shared": "4.0.0-beta.43",
@@ -31,6 +58,9 @@
   "peerDependencies": {
     "effect": "^4.0.0-beta.43",
     "@effect/platform-node-shared": "^4.0.0-beta.43"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "packageManager": "bun@1.3.11",
   "dependencies": {
