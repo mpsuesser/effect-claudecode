@@ -10,14 +10,15 @@
  *
  * Run:
  *
- *     bun examples/plugin-define-complete.ts /tmp/my-plugin
+ *     bun examples/plugin-define-complete.ts artifacts/effect-review-kit
  *
  * Resulting directory structure:
  *
- *     /tmp/my-plugin/
+ *     artifacts/effect-review-kit/
  *         .claude-plugin/plugin.json
  *         commands/review.md
- *         skills/greet/SKILL.md
+ *         skills/effect-first/SKILL.md
+ *         output-styles/concise-review.md
  *         hooks/hooks.json
  *         .mcp.json
  *
@@ -29,38 +30,48 @@ import { ClaudeRuntime, Plugin } from 'effect-claudecode';
 
 const plugin = Plugin.define({
 	manifest: {
-		name: 'effect-guardrails',
+		name: 'effect-review-kit',
 		version: '0.1.0',
-		description: 'Effect-first guardrail hooks for Claude Code',
+		description: 'Project-aware review defaults for Claude Code',
 		author: new Plugin.AuthorInfo({
 			name: 'Alice',
 			email: 'alice@example.com'
 		}),
-		keywords: ['effect', 'guardrails', 'claude-code']
+		keywords: ['effect', 'review', 'claude-code']
 	},
 	commands: [
 		Plugin.command({
 			name: 'review',
-			description: 'Review staged diffs for Effect v4 compliance',
+			description: 'Review staged changes with project conventions',
 			body:
-				'# Review\n\nReview the staged changes for Effect v4 compliance and report any issues.\n'
+				'# Review\n\nReview the staged changes. Lead with concrete findings, then call out regressions and missing tests.\n'
 		})
 	],
 	skills: [
 		Plugin.skill({
-			name: 'greet',
-			description: 'Say hello to the user',
-			body: '# Greet\n\nSay hi in a friendly tone.\n'
+			name: 'effect-first',
+			description: 'Keep implementations aligned with Effect v4 conventions',
+			body:
+				'# Effect-First\n\nPrefer typed errors, `Option` for absence, and `Schema` decoding at boundaries.\n'
+		})
+	],
+	outputStyles: [
+		Plugin.outputStyle({
+			name: 'concise-review',
+			description: 'Lead with findings and keep the summary tight',
+			body:
+				'# Concise Review\n\nStart with issues worth fixing. Keep supporting detail brief and specific.\n'
 		})
 	],
 	hooksConfig: {
-		PreToolUse: [
+		PostToolUse: [
 			{
-				matcher: 'Bash',
+				matcher: 'Read',
 				hooks: [
 					{
 						type: 'command',
-						command: 'bun ${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash.ts'
+						command:
+							'bun ${CLAUDE_PLUGIN_ROOT}/hooks/post-read-source-hint.ts'
 					}
 				]
 			}
@@ -77,15 +88,15 @@ const plugin = Plugin.define({
 	}
 });
 
-const destDir = process.argv[2] ?? './dist-plugin';
+const outputDir = process.argv[2] ?? 'artifacts/effect-review-kit';
 
 const program = Plugin.validate(plugin).pipe(
-	Effect.flatMap(() => Plugin.write(plugin, destDir)),
-	Effect.flatMap(() => Plugin.doctor(destDir)),
+	Effect.flatMap(() => Plugin.write(plugin, outputDir)),
+	Effect.flatMap(() => Plugin.doctor(outputDir)),
 	Effect.tap((report) =>
 		Effect.logInfo('plugin materialized').pipe(
 			Effect.annotateLogs({
-				destDir,
+				outputDir,
 				errors: report.errors.length,
 				warnings: report.warnings.length
 			})

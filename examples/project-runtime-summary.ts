@@ -19,7 +19,8 @@ import * as Option from 'effect/Option';
 
 import { ClaudeProject, ClaudeRuntime } from 'effect-claudecode';
 
-const runtime = ClaudeRuntime.project({ cwd: process.cwd() });
+const workspaceDir = process.cwd();
+const runtime = ClaudeRuntime.project({ cwd: workspaceDir });
 
 const program = Effect.gen(function* () {
 	const project = yield* ClaudeProject.project;
@@ -29,19 +30,21 @@ const program = Effect.gen(function* () {
 		project.mcp
 	]);
 
-	yield* Effect.logInfo('project summary').pipe(
-		Effect.annotateLogs({
-			cwd: project.cwd,
-			model: settings.model ?? 'unset',
-			reviewSkill: Option.match(reviewSkill, {
-				onNone: () => 'missing',
-				onSome: (skill) => skill.path ?? 'present'
-			}),
-			mcp: Option.match(mcp, {
-				onNone: () => 'missing',
-				onSome: () => 'configured'
-			})
+	const summary = {
+		workspaceDir,
+		model: settings.model ?? 'unset',
+		reviewSkill: Option.match(reviewSkill, {
+			onNone: () => 'missing',
+			onSome: (skill) => skill.path ?? 'present'
+		}),
+		mcp: Option.match(mcp, {
+			onNone: () => 'missing',
+			onSome: () => 'configured'
 		})
+	};
+
+	yield* Effect.logInfo('project summary').pipe(
+		Effect.annotateLogs(summary)
 	);
 }).pipe(Effect.withLogSpan('project.summary'));
 
