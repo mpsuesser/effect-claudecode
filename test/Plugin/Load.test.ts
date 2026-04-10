@@ -92,6 +92,75 @@ describe('Plugin.scan', () => {
 			)
 		)
 	);
+
+	it.effect('uses manifest-declared non-canonical component paths when present', () =>
+		Effect.gen(function* () {
+			const scanned = yield* Plugin.scan('/plugin');
+
+			expect(scanned.commandPaths).toEqual(['/plugin/custom/commands/review.md']);
+			expect(scanned.agentPaths).toEqual(['/plugin/custom/agents/reviewer.md']);
+			expect(scanned.skillPaths).toEqual(['/plugin/knowledge/greet/SKILL.md']);
+			expect(scanned.outputStylePaths).toEqual(['/plugin/styles/terse.md']);
+			expect(scanned.hooksPaths).toEqual(['/plugin/config/hooks.json']);
+			expect(scanned.mcpPaths).toEqual(['/plugin/config/mcp.json']);
+			expect(scanned.inferredManifest).toMatchObject({
+				commands: 'custom/commands',
+				agents: 'custom/agents',
+				skills: 'knowledge',
+				outputStyles: 'styles',
+				hooks: 'config/hooks.json',
+				mcpServers: 'config/mcp.json'
+			});
+		}).pipe(
+			Effect.provide(
+				Testing.makeMockFileSystem(
+					fsWith([
+						[
+							'/plugin/.claude-plugin/plugin.json',
+							JSON.stringify({
+								name: 'guardrails',
+								commands: 'custom/commands',
+								agents: 'custom/agents',
+								skills: 'knowledge',
+								outputStyles: 'styles',
+								hooks: 'config/hooks.json',
+								mcpServers: 'config/mcp.json'
+							})
+						],
+						[
+							'/plugin/custom/commands/review.md',
+							'---\ndescription: Review\n---\n\n# /review\n'
+						],
+						[
+							'/plugin/custom/agents/reviewer.md',
+							'---\nname: reviewer\ndescription: Review changes\n---\n\n# Reviewer\n'
+						],
+						[
+							'/plugin/knowledge/greet/SKILL.md',
+							'---\nname: greet\ndescription: Say hi\n---\n\n# Greet\n'
+						],
+						[
+							'/plugin/styles/terse.md',
+							'---\nname: terse\ndescription: Keep it compact\n---\n\n# Terse\n'
+						],
+						[
+							'/plugin/config/hooks.json',
+							JSON.stringify({ PostToolUse: [] })
+						],
+						[
+							'/plugin/config/mcp.json',
+							JSON.stringify({
+								mcpServers: {
+									fs: { type: 'stdio', command: 'mcp-fs' }
+								}
+							})
+						]
+					])
+				)
+				.layer
+			)
+		)
+	);
 });
 
 describe('Plugin.load', () => {
@@ -101,7 +170,10 @@ describe('Plugin.load', () => {
 
 			expect(loaded.manifest.name).toBe('guardrails');
 			expect(loaded.commands).toHaveLength(1);
-			expect(loaded.commands[0]).toMatchObject({ name: 'review' });
+			expect(loaded.commands[0]).toMatchObject({
+				name: 'review',
+				path: 'commands/review.md'
+			});
 			expect(loaded.agents[0]).toMatchObject({ name: 'reviewer' });
 			expect(loaded.skills[0]).toMatchObject({ name: 'greet' });
 			expect(loaded.outputStyles[0]).toMatchObject({ name: 'terse' });
@@ -150,6 +222,48 @@ describe('Plugin.load', () => {
 		)
 	);
 
+	it.effect('loads inline hooks and MCP config from the manifest', () =>
+		Effect.gen(function* () {
+			const loaded = yield* Plugin.load('/plugin');
+
+			expect(Option.isSome(loaded.hooksConfig)).toBe(true);
+			expect(Option.isSome(loaded.mcpConfig)).toBe(true);
+			expect(loaded.commands[0]).toMatchObject({
+				name: 'review',
+				path: 'custom/review.md'
+			});
+			expect(loaded.manifest.hooks).toMatchObject({ PostToolUse: [] });
+			if (Option.isSome(loaded.mcpConfig)) {
+				expect(loaded.mcpConfig.value.mcpServers).toMatchObject({
+					fs: { type: 'stdio', command: 'mcp-fs' }
+				});
+			}
+		}).pipe(
+			Effect.provide(
+				Testing.makeMockFileSystem(
+					fsWith([
+						[
+							'/plugin/.claude-plugin/plugin.json',
+							JSON.stringify({
+								name: 'guardrails',
+								commands: 'custom',
+								hooks: { PostToolUse: [] },
+								mcpServers: {
+									fs: { type: 'stdio', command: 'mcp-fs' }
+								}
+							})
+						],
+						[
+							'/plugin/custom/review.md',
+							'---\ndescription: Review\n---\n\n# /review\n'
+						]
+					])
+				)
+				.layer
+			)
+		)
+	);
+
 	it.effect('wraps component decode failures in PluginLoadError', () =>
 		Effect.gen(function* () {
 			const raised = yield* Effect.flip(Plugin.load('/plugin'));
@@ -175,7 +289,7 @@ describe('Plugin.load', () => {
 });
 
 describe('Plugin.sync', () => {
-	it('rewrites manifest paths to the canonical Plugin.write layout', () => {
+	it('preserves an explicit non-canonical layout instead of clobbering it', () => {
 		const synced = Plugin.sync(
 			Plugin.define({
 				manifest: {
@@ -205,9 +319,9 @@ describe('Plugin.sync', () => {
 		expect(synced.manifest).toMatchObject({
 			name: 'guardrails',
 			description: 'Guardrail hooks',
-			commands: 'commands',
+			commands: 'old-commands',
 			skills: 'skills',
-			hooks: 'hooks/hooks.json'
+			hooks: 'old-hooks.json'
 		});
 		expect(synced.manifest.agents).toBeUndefined();
 		expect(synced.manifest.outputStyles).toBeUndefined();

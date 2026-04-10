@@ -45,6 +45,13 @@ import {
 } from '../Frontmatter.ts';
 import { McpJsonFile, type McpJsonFileInput } from '../Mcp.ts';
 import { HooksSection } from '../Settings/HooksSection.ts';
+import {
+	isJsonFilePath,
+	isMarkdownFilePath,
+	isSkillFilePath,
+	pathSpecs,
+	syncManifest
+} from './Layout.ts';
 import { PluginManifest } from './Manifest.ts';
 
 type HooksConfig = Schema.Schema.Type<typeof HooksSection>;
@@ -61,6 +68,7 @@ type HooksConfig = Schema.Schema.Type<typeof HooksSection>;
  */
 export interface PluginCommandEntry {
 	readonly name: string;
+	readonly path?: string;
 	readonly frontmatter: CommandFrontmatter;
 	readonly body: string;
 }
@@ -73,6 +81,7 @@ export interface PluginCommandEntry {
  */
 export interface PluginAgentEntry {
 	readonly name: string;
+	readonly path?: string;
 	readonly frontmatter: SubagentFrontmatter;
 	readonly body: string;
 }
@@ -85,6 +94,7 @@ export interface PluginAgentEntry {
  */
 export interface PluginSkillEntry {
 	readonly name: string;
+	readonly path?: string;
 	readonly frontmatter: SkillFrontmatter;
 	readonly body: string;
 }
@@ -97,6 +107,7 @@ export interface PluginSkillEntry {
  */
 export interface PluginOutputStyleEntry {
 	readonly name: string;
+	readonly path?: string;
 	readonly frontmatter: OutputStyleFrontmatter;
 	readonly body: string;
 }
@@ -105,16 +116,19 @@ export type PluginManifestInput = ConstructorParameters<typeof PluginManifest>[0
 
 export type PluginCommandConfig = CommandFrontmatterInput & {
 	readonly name: string;
+	readonly path?: string;
 	readonly body: string;
 };
 
 export type PluginAgentConfig = Omit<SubagentFrontmatterInput, 'name'> & {
 	readonly name: string;
+	readonly path?: string;
 	readonly body: string;
 };
 
 export type PluginSkillConfig = Omit<SkillFrontmatterInput, 'name'> & {
 	readonly name: string;
+	readonly path?: string;
 	readonly body: string;
 };
 
@@ -123,6 +137,7 @@ export type PluginOutputStyleConfig = Omit<
 	'name'
 > & {
 	readonly name: string;
+	readonly path?: string;
 	readonly body: string;
 };
 
@@ -172,9 +187,10 @@ export interface PluginDefinition {
  * @since 0.1.0
  */
 export const command = (config: PluginCommandConfig): PluginCommandEntry => {
-	const { name, body, ...frontmatter } = config;
+	const { name, path, body, ...frontmatter } = config;
 	return {
 		name,
+		...(path !== undefined ? { path } : {}),
 		frontmatter: new CommandFrontmatter(frontmatter),
 		body
 	};
@@ -187,9 +203,10 @@ export const command = (config: PluginCommandConfig): PluginCommandEntry => {
  * @since 0.1.0
  */
 export const agent = (config: PluginAgentConfig): PluginAgentEntry => {
-	const { name, body, ...frontmatter } = config;
+	const { name, path, body, ...frontmatter } = config;
 	return {
 		name,
+		...(path !== undefined ? { path } : {}),
 		frontmatter: new SubagentFrontmatter({ name, ...frontmatter }),
 		body
 	};
@@ -202,9 +219,10 @@ export const agent = (config: PluginAgentConfig): PluginAgentEntry => {
  * @since 0.1.0
  */
 export const skill = (config: PluginSkillConfig): PluginSkillEntry => {
-	const { name, body, ...frontmatter } = config;
+	const { name, path, body, ...frontmatter } = config;
 	return {
 		name,
+		...(path !== undefined ? { path } : {}),
 		frontmatter: new SkillFrontmatter({ name, ...frontmatter }),
 		body
 	};
@@ -219,9 +237,10 @@ export const skill = (config: PluginSkillConfig): PluginSkillEntry => {
 export const outputStyle = (
 	config: PluginOutputStyleConfig
 ): PluginOutputStyleEntry => {
-	const { name, body, ...frontmatter } = config;
+	const { name, path, body, ...frontmatter } = config;
 	return {
 		name,
+		...(path !== undefined ? { path } : {}),
 		frontmatter: new OutputStyleFrontmatter({ name, ...frontmatter }),
 		body
 	};
@@ -278,6 +297,133 @@ const normalizeOutputStyleEntry = (
 	return entry;
 };
 
+const layoutError = (path: string, message: string): PluginWriteError =>
+	new PluginWriteError({ path, cause: new Error(message) });
+
+const resolveFlatEntryRelativePath = <Entry extends { readonly name: string; readonly path?: string }>(
+	options: {
+		readonly destDir: string;
+		readonly field: string;
+		readonly defaultDir: string;
+		readonly spec: string | ReadonlyArray<string> | undefined;
+		readonly entry: Entry;
+	}
+): Effect.Effect<string, PluginWriteError> => {
+	if (options.entry.path !== undefined) {
+		return Effect.succeed(options.entry.path);
+	}
+
+	const specs = pathSpecs(options.spec);
+	if (specs.length === 0) {
+		return Effect.succeed(`${options.defaultDir}/${options.entry.name}.md`);
+	}
+	if (specs.length > 1) {
+		return Effect.fail(
+			layoutError(
+				options.destDir,
+				`${options.field} uses multiple target paths; provide explicit entry.path values before writing`
+			)
+		);
+	}
+
+	const [target] = specs;
+	if (target === undefined) {
+		return Effect.fail(
+			layoutError(options.destDir, `${options.field} target path is missing`)
+		);
+	}
+	return Effect.succeed(
+		isMarkdownFilePath(target)
+			? target
+			: `${target}/${options.entry.name}.md`
+	);
+};
+
+const resolveSkillRelativePath = (
+	options: {
+		readonly destDir: string;
+		readonly spec: string | ReadonlyArray<string> | undefined;
+		readonly entry: PluginSkillEntry;
+	}
+): Effect.Effect<string, PluginWriteError> => {
+	if (options.entry.path !== undefined) {
+		return Effect.succeed(options.entry.path);
+	}
+
+	const specs = pathSpecs(options.spec);
+	if (specs.length === 0) {
+		return Effect.succeed(`skills/${options.entry.name}/SKILL.md`);
+	}
+	if (specs.length > 1) {
+		return Effect.fail(
+			layoutError(
+				options.destDir,
+				'skills uses multiple target paths; provide explicit entry.path values before writing'
+			)
+		);
+	}
+
+	const [target] = specs;
+	if (target === undefined) {
+		return Effect.fail(layoutError(options.destDir, 'skills target path is missing'));
+	}
+	return Effect.succeed(
+		isSkillFilePath(target)
+			? target
+			: `${target}/${options.entry.name}/SKILL.md`
+	);
+};
+
+const resolveConfigRelativePath = (
+	options: {
+		readonly destDir: string;
+		readonly field: string;
+		readonly fallback: string;
+		readonly spec: unknown;
+	}
+): Effect.Effect<Option.Option<string>, PluginWriteError> => {
+	if (
+		options.spec !== undefined &&
+		typeof options.spec !== 'string' &&
+		!Array.isArray(options.spec)
+	) {
+		return Effect.succeed(Option.none());
+	}
+
+	const specs = pathSpecs(
+		typeof options.spec === 'string' || Array.isArray(options.spec)
+			? options.spec
+			: undefined
+	);
+	if (specs.length === 0) {
+		return Effect.succeed(Option.some(options.fallback));
+	}
+	if (specs.length > 1) {
+		return Effect.fail(
+			layoutError(
+				options.destDir,
+				`${options.field} uses multiple target paths; run Plugin.sync(...) before writing`
+			)
+		);
+	}
+
+	const [target] = specs;
+	if (target === undefined) {
+		return Effect.fail(
+			layoutError(options.destDir, `${options.field} target path is missing`)
+		);
+	}
+	if (!isJsonFilePath(target)) {
+		return Effect.fail(
+			layoutError(
+				options.destDir,
+				`${options.field} target path must be a JSON file path`
+			)
+		);
+	}
+	return Effect.succeed(Option.some(target));
+};
+
 /**
  * Build a `PluginDefinition` from a plain config object. If
  * `config.manifest` is a raw object, it is passed through the
@@ -323,9 +469,11 @@ export const define = (config: PluginConfig): PluginDefinition => ({
 const writeFile = (
 	filePath: string,
 	content: string
-): Effect.Effect<void, PluginWriteError, FileSystem.FileSystem> =>
+): Effect.Effect<void, PluginWriteError, FileSystem.FileSystem | Path.Path> =>
 	Effect.gen(function* () {
+		const path = yield* Path.Path;
 		const fs = yield* FileSystem.FileSystem;
+		yield* makeDir(path.dirname(filePath));
 		yield* fs
 			.writeFileString(filePath, content)
 			.pipe(
@@ -358,7 +506,8 @@ const makeDir = (
  * @internal
  */
 const writeCommandEntries = (
-	dir: string,
+	rootDir: string,
+	spec: string | ReadonlyArray<string> | undefined,
 	entries: ReadonlyArray<PluginCommandEntry>
 ): Effect.Effect<
 	void,
@@ -368,17 +517,31 @@ const writeCommandEntries = (
 	Effect.gen(function* () {
 		if (entries.length === 0) return;
 		const path = yield* Path.Path;
-		yield* makeDir(dir);
 		yield* Effect.forEach(entries, (entry) =>
-			writeFile(
-				path.join(dir, `${entry.name}.md`),
-				renderCommand(entry.frontmatter, entry.body)
+			resolveFlatEntryRelativePath({
+				destDir: rootDir,
+				field: 'commands',
+				defaultDir: 'commands',
+				spec,
+				entry
+			}).pipe(
+				Effect.flatMap((relativePath) =>
+					writeFile(
+						path.join(rootDir, relativePath),
+						renderCommand(entry.frontmatter, entry.body)
+					)
+				)
 			)
 		);
 	});
 
-const writeFlatNamedEntries = <Entry extends { readonly name: string }>(
-	dir: string,
+const writeFlatNamedEntries = <
+	Entry extends { readonly name: string; readonly path?: string }
+>(
+	rootDir: string,
+	spec: string | ReadonlyArray<string> | undefined,
+	field: string,
+	defaultDir: string,
 	entries: ReadonlyArray<Entry>,
 	renderEntry: (entry: Entry) => string
 ): Effect.Effect<
@@ -389,9 +552,18 @@ const writeFlatNamedEntries = <Entry extends { readonly name: string }>(
 	Effect.gen(function* () {
 		if (entries.length === 0) return;
 		const path = yield* Path.Path;
-		yield* makeDir(dir);
 		yield* Effect.forEach(entries, (entry) =>
-			writeFile(path.join(dir, `${entry.name}.md`), renderEntry(entry))
+			resolveFlatEntryRelativePath({
+				destDir: rootDir,
+				field,
+				defaultDir,
+				spec,
+				entry
+			}).pipe(
+				Effect.flatMap((relativePath) =>
+					writeFile(path.join(rootDir, relativePath), renderEntry(entry))
+				)
+			)
 		);
 	});
 
@@ -403,7 +575,8 @@ const writeFlatNamedEntries = <Entry extends { readonly name: string }>(
  * @internal
  */
 const writeSkillEntries = (
-	skillsDir: string,
+	rootDir: string,
+	spec: string | ReadonlyArray<string> | undefined,
 	entries: ReadonlyArray<PluginSkillEntry>
 ): Effect.Effect<
 	void,
@@ -413,16 +586,19 @@ const writeSkillEntries = (
 	Effect.gen(function* () {
 		if (entries.length === 0) return;
 		const path = yield* Path.Path;
-		yield* makeDir(skillsDir);
 		yield* Effect.forEach(entries, (entry) =>
-			Effect.gen(function* () {
-				const dir = path.join(skillsDir, entry.name);
-				yield* makeDir(dir);
-				yield* writeFile(
-					path.join(dir, 'SKILL.md'),
-					renderSkill(entry.frontmatter, entry.body)
-				);
-			})
+			resolveSkillRelativePath({
+				destDir: rootDir,
+				spec,
+				entry
+			}).pipe(
+				Effect.flatMap((relativePath) =>
+					writeFile(
+						path.join(rootDir, relativePath),
+						renderSkill(entry.frontmatter, entry.body)
+					)
+				)
+			)
 		);
 	});
 
@@ -490,56 +666,79 @@ export const write = (
 > =>
 	Effect.gen(function* () {
 		const path = yield* Path.Path;
+		const manifest = syncManifest(definition);
 
 		// .claude-plugin/plugin.json
 		const claudePluginDir = path.join(destDir, '.claude-plugin');
 		yield* makeDir(claudePluginDir);
 		yield* writeFile(
 			path.join(claudePluginDir, 'plugin.json'),
-			toJsonFileContent(definition.manifest)
+			toJsonFileContent(manifest)
 		);
 
 		// commands/<name>.md
 		yield* writeCommandEntries(
-			path.join(destDir, 'commands'),
+			destDir,
+			manifest.commands,
 			definition.commands
 		);
 
 		// agents/<name>.md
 		yield* writeFlatNamedEntries(
-			path.join(destDir, 'agents'),
+			destDir,
+			manifest.agents,
+			'agents',
+			'agents',
 			definition.agents,
 			(entry) => renderSubagent(entry.frontmatter, entry.body)
 		);
 
 		// skills/<name>/SKILL.md
 		yield* writeSkillEntries(
-			path.join(destDir, 'skills'),
+			destDir,
+			manifest.skills,
 			definition.skills
 		);
 
 		// output-styles/<name>.md
 		yield* writeFlatNamedEntries(
-			path.join(destDir, 'output-styles'),
+			destDir,
+			manifest.outputStyles,
+			'outputStyles',
+			'output-styles',
 			definition.outputStyles,
 			(entry) => renderOutputStyle(entry.frontmatter, entry.body)
 		);
 
 		// hooks/hooks.json
 		if (Option.isSome(definition.hooksConfig)) {
-			const hooksDir = path.join(destDir, 'hooks');
-			yield* makeDir(hooksDir);
-			yield* writeFile(
-				path.join(hooksDir, 'hooks.json'),
-				toJsonFileContent(definition.hooksConfig.value)
-			);
+			const hooksPath = yield* resolveConfigRelativePath({
+				destDir,
+				field: 'hooks',
+				fallback: 'hooks/hooks.json',
+				spec: manifest.hooks
+			});
+			if (Option.isSome(hooksPath)) {
+				yield* writeFile(
+					path.join(destDir, hooksPath.value),
+					toJsonFileContent(definition.hooksConfig.value)
+				);
+			}
 		}
 
 		// .mcp.json
 		if (Option.isSome(definition.mcpConfig)) {
-			yield* writeFile(
-				path.join(destDir, '.mcp.json'),
-				toJsonFileContent(definition.mcpConfig.value)
-			);
+			const mcpPath = yield* resolveConfigRelativePath({
+				destDir,
+				field: 'mcpServers',
+				fallback: '.mcp.json',
+				spec: manifest.mcpServers
+			});
+			if (Option.isSome(mcpPath)) {
+				yield* writeFile(
+					path.join(destDir, mcpPath.value),
+					toJsonFileContent(definition.mcpConfig.value)
+				);
+			}
 		}
 	});

@@ -157,6 +157,42 @@ describe('Plugin.write — directory layout', () => {
 		})
 	);
 
+	it.effect('respects explicit non-canonical component paths', () =>
+		Effect.gen(function* () {
+			const def = Define.define({
+				manifest: {
+					name: 'p',
+					commands: 'custom/commands',
+					skills: 'knowledge'
+				},
+				commands: [
+					Define.command({
+						name: 'review',
+						description: 'Review',
+						body: '# Review\n'
+					})
+				],
+				skills: [
+					Define.skill({
+						name: 'greet',
+						description: 'Say hi',
+						body: '# Greet\n'
+					})
+				]
+			});
+
+			const fileSystem = yield* Testing.writePluginToMemory(def, '/dest');
+			const snapshot = fileSystem.snapshot();
+
+			expect(snapshot.files.get('/dest/custom/commands/review.md')).toContain(
+				'# Review'
+			);
+			expect(snapshot.files.get('/dest/knowledge/greet/SKILL.md')).toContain(
+				'name: greet'
+			);
+		})
+	);
+
 	it.effect('writes agents/<name>.md entries under the agents dir', () =>
 		Effect.gen(function* () {
 			const def = Define.define({
