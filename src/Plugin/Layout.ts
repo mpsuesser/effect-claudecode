@@ -35,6 +35,13 @@ const keepOrDefaultHooksSpec = (
 	spec: HooksSpec | undefined,
 	hasConfig: boolean
 ): HooksSpec | undefined => {
+	if (
+		spec !== undefined &&
+		typeof spec !== 'string' &&
+		!Array.isArray(spec)
+	) {
+		return spec;
+	}
 	if (!hasConfig) {
 		return undefined;
 	}
@@ -49,6 +56,13 @@ const keepOrDefaultServerSpec = (
 	hasConfig: boolean,
 	fallback: string
 ): ServerConfigSpec | undefined => {
+	if (
+		spec !== undefined &&
+		typeof spec !== 'string' &&
+		!Array.isArray(spec)
+	) {
+		return spec;
+	}
 	if (!hasConfig) {
 		return undefined;
 	}

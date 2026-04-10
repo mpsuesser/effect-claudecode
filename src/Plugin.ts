@@ -65,3 +65,16 @@ export type {
 
 export { load, scan, sync } from './Plugin/Load.ts';
 export type { LoadedPlugin, PluginScan } from './Plugin/Load.ts';
+
+export {
+	doctor,
+	lint,
+	PluginIssue,
+	PluginIssueSeverity,
+	PluginValidationError,
+	validate
+} from './Plugin/Validate.ts';
+export type {
+	PluginDoctorReport,
+	PluginLintReport
+} from './Plugin/Validate.ts';
