@@ -27,7 +27,7 @@ export {
 // Context
 // ---------------------------------------------------------------------------
 
-export { HookContext } from './Hook/Context.ts';
+export { HookContext, HookContext as Context } from './Hook/Context.ts';
 export {
 	cwd,
 	hookEventName,

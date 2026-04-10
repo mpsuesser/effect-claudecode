@@ -13,6 +13,7 @@ import * as ConfigProvider from 'effect/ConfigProvider';
 import * as Effect from 'effect/Effect';
 import * as FileSystem from 'effect/FileSystem';
 import * as Layer from 'effect/Layer';
+import * as Logger from 'effect/Logger';
 import * as Option from 'effect/Option';
 import * as Path from 'effect/Path';
 import * as PlatformError from 'effect/PlatformError';
@@ -200,6 +201,25 @@ describe('ClaudeRuntime', () => {
 			expect(capture.writes.get('/dest/.claude-plugin/plugin.json')).toContain(
 				'"name": "runtime-plugin"'
 			);
+		} finally {
+			await runtime.dispose();
+		}
+	});
+
+	it('suppresses logs when logger is none', async () => {
+		const messages: Array<string> = [];
+		const runtime = ClaudeRuntime.default({
+			layer: Logger.layer([
+				Logger.make((options) => {
+					messages.push(String(options.message));
+				})
+			]),
+			logger: 'none'
+		});
+
+		try {
+			await runtime.runPromise(Effect.log('hidden log entry'));
+			expect(messages).toEqual([]);
 		} finally {
 			await runtime.dispose();
 		}

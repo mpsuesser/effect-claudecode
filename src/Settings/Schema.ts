@@ -54,18 +54,24 @@ export class StatusLineConfig extends Schema.Class<StatusLineConfig>(
 }) {}
 
 // ---------------------------------------------------------------------------
-// MCP server entry type alias
+// MCP server entry schema
 // ---------------------------------------------------------------------------
 
 /**
- * A single MCP server entry inside settings.json. The stricter schema
- * lives in `src/Mcp/` — here we only reserve a type alias so barrels
- * can re-export it.
+ * A single MCP server entry inside settings.json.
+ *
+ * The stricter schema lives in `src/Mcp/`; settings keeps this loose so
+ * the Settings namespace does not depend on the MCP module.
  *
  * @category Schemas
  * @since 0.1.0
  */
-export type McpServerEntry = Readonly<Record<string, unknown>>;
+export const McpServerEntry = Schema.Record(
+	Schema.String,
+	Schema.Unknown
+).annotate({ identifier: 'McpServerEntry' });
+
+export type McpServerEntry = Schema.Schema.Type<typeof McpServerEntry>;
 
 // ---------------------------------------------------------------------------
 // Marketplace source
@@ -144,7 +150,7 @@ export class SettingsFile extends Schema.Class<SettingsFile>('SettingsFile')({
 	statusLine: Schema.optional(StatusLineConfig),
 
 	mcpServers: Schema.optional(
-		Schema.Record(Schema.String, Schema.Unknown)
+		Schema.Record(Schema.String, McpServerEntry)
 	),
 
 	env: Schema.optional(Schema.Record(Schema.String, Schema.String)),

@@ -4,8 +4,9 @@
  * Complements `Plugin.write` with the inverse operations for existing plugin
  * directories: `scan` inspects canonical component locations and infers a
  * normalized manifest, `load` parses the discovered files into a typed
- * `PluginDefinition`, and `sync` rewrites a definition's manifest paths to the
- * canonical layout produced by `Plugin.write`.
+ * `PluginDefinition`, and `sync` preserves explicit layout choices while
+ * filling in the default paths that `Plugin.write` uses when a manifest field
+ * is omitted.
  *
  * @since 0.1.0
  */
@@ -232,13 +233,6 @@ const markdownFilePaths = (
 			.map((entry) => path.join(dirPath, entry))
 	);
 
-const skillFilePaths = (
-	skillsDir: string,
-	entries: ReadonlyArray<string>,
-	path: Path.Path
-): ReadonlyArray<string> =>
-	listSorted(entries.map((entry) => path.join(skillsDir, entry, 'SKILL.md')));
-
 const relativeManifestPaths = (
 	spec: string | ReadonlyArray<string> | undefined
 ): ReadonlyArray<string> => pathSpecs(spec);
@@ -284,7 +278,18 @@ const expandSkillPathSpec = (options: {
 		if (declared.length === 0) {
 			const dirPath = path.join(options.rootDir, options.fallbackDir);
 			const entries = yield* readDirectoryIfExists(dirPath);
-			return skillFilePaths(dirPath, entries, path);
+			const discovered = yield* Effect.forEach(entries, (entry) =>
+				Effect.gen(function* () {
+					const skillPath = path.join(dirPath, entry, 'SKILL.md');
+					const exists = yield* fs.exists(skillPath).pipe(
+						Effect.mapError(
+							(cause) => new PluginLoadError({ path: skillPath, cause })
+						)
+					);
+					return exists ? Option.some(skillPath) : Option.none<string>();
+				})
+			);
+			return listSorted(Arr.getSomes(discovered));
 		}
 
 		const resolved = yield* Effect.forEach(declared, (relativePath) =>
@@ -739,8 +744,8 @@ export const load = (
 	})(rootDir);
 
 /**
- * Normalize a plugin definition's manifest paths to the canonical layout used
- * by `Plugin.write`.
+ * Normalize a plugin definition's manifest by preserving explicit layout
+ * choices and filling in default paths for missing component/config entries.
  *
  * @category Loaders
  * @since 0.1.0

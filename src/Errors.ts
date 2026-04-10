@@ -98,7 +98,7 @@ export class HookToolDecodeError extends Schema.TaggedErrorClass<HookToolDecodeE
 )('HookToolDecodeError', {
 	event: Schema.Literals(['PreToolUse', 'PostToolUse']),
 	toolName: Schema.String,
-	payload: Schema.Literals(['tool_input', 'tool_response']),
+	payload: Schema.Literals(['tool_name', 'tool_input', 'tool_response']),
 	cause: Schema.Defect
 }) {}
 

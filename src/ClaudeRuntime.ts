@@ -16,6 +16,7 @@ import * as Layer from 'effect/Layer';
 import * as Logger from 'effect/Logger';
 import * as ManagedRuntime from 'effect/ManagedRuntime';
 import * as Path from 'effect/Path';
+import * as References from 'effect/References';
 
 import * as ClaudeProject from './ClaudeProject.ts';
 
@@ -126,7 +127,7 @@ const loggerLayer = (
 	mergeWithExistingLoggers: boolean
 ): Layer.Layer<never> => {
 	if (kind === 'none') {
-		return Layer.empty;
+		return Layer.succeed(References.MinimumLogLevel, 'None');
 	}
 
 	const logger =

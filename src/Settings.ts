@@ -16,13 +16,13 @@ export {
 	GithubMarketplace,
 	GithubSourceSpec,
 	Marketplace,
+	McpServerEntry,
 	PermissionMode,
 	PermissionsConfig,
 	SettingsFile,
 	StatusLineConfig,
 	WorkingDirectoriesConfig
 } from './Settings/Schema.ts';
-export type { McpServerEntry } from './Settings/Schema.ts';
 
 // ---------------------------------------------------------------------------
 // Hooks section

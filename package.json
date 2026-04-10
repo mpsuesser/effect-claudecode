@@ -1,7 +1,7 @@
 {
   "$schema": "https://www.schemastore.org/package.json",
   "name": "effect-claudecode",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Effect runtime and bindings around Claude Code plugin primitives — write Claude Code plugins in a maximally Effect-first way.",
   "keywords": [
     "claude",
@@ -27,6 +27,7 @@
   "type": "module",
   "files": [
     "dist",
+    "examples",
     "README.md",
     "LICENSE"
   ],
@@ -39,7 +40,7 @@
     }
   },
   "scripts": {
-    "build": "rm -rf dist && bun run build:ts && bun run build:types:rewrite",
+    "build": "bun -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\" && bun run build:ts && bun run build:types:rewrite",
     "build:ts": "tsc -p tsconfig.build.json",
     "build:types:rewrite": "bun ./scripts/rewrite-dts-relative-imports.mjs",
     "check": "bun run test && bun run typecheck && bun run build && bun run pack:dry-run",

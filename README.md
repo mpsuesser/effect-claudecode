@@ -28,7 +28,7 @@ process.stdin.on('end', () => {
         hookEventName: 'PreToolUse',
         updatedInput: { command: command.replace('npm test', 'bun run test') },
         permissionDecision: 'allow',
-        reason: 'This workspace runs tests through Bun.'
+        permissionDecisionReason: 'This workspace runs tests through Bun.'
       }}
     : { continue: true };
   process.stdout.write(JSON.stringify(output));
@@ -653,7 +653,7 @@ await runtime.runPromise(
 await runtime.dispose();
 ```
 
-Directory layout produced:
+Default directory layout produced when you do not override manifest or entry paths:
 
 ```
 outputDir/
@@ -691,7 +691,7 @@ await runtime.dispose();
 
 - `Plugin.scan(dir)` inspects the canonical component layout and infers a normalized manifest.
 - `Plugin.load(dir)` parses the discovered command, agent, skill, and output-style files into a typed `PluginDefinition`.
-- `Plugin.sync(def)` rewrites manifest path fields to the canonical layout produced by `Plugin.write`.
+- `Plugin.sync(def)` preserves explicit manifest layout fields and fills in the default paths `Plugin.write` uses when those fields are omitted.
 
 #### Exported schemas
 

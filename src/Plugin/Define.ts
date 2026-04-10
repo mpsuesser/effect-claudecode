@@ -6,7 +6,8 @@
  * component files (commands, agents, skills, output styles) plus
  * optional hooks/MCP inline configs. `Plugin.write` materializes a
  * definition to a destination directory via the injected `FileSystem`
- * and `Path` services, producing the canonical directory layout:
+ * and `Path` services. When the manifest and entries do not override paths,
+ * it produces the default directory layout:
  *
  * ```text
  * destDir/
@@ -638,8 +639,8 @@ const toJsonFileContent = (value: unknown): string =>
  * ```ts
  * import * as Effect from 'effect/Effect'
  * import * as Layer from 'effect/Layer'
- * import { NodeFileSystem } from '@effect/platform-node'
- * import { NodePath } from '@effect/platform-node'
+ * import * as NodeFileSystem from '@effect/platform-node-shared/NodeFileSystem'
+ * import * as NodePath from '@effect/platform-node-shared/NodePath'
  * import { Plugin } from 'effect-claudecode'
  *
  * const def = Plugin.define({

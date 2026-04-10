@@ -24,8 +24,9 @@
  *         hooks/hooks.json
  *         .mcp.json
  *
- * Install the plugin by adding the output directory to your
- * `.claude/settings.json` under `projects.allowed_plugins`.
+ * Install the plugin by adding it to `.claude/settings.json` via
+ * `enabledPlugins`, and point `extraKnownMarketplaces` at the directory
+ * that contains the generated plugin.
  *
  * @since 0.1.0
  */

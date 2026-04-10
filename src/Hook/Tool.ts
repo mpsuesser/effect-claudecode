@@ -214,7 +214,7 @@ export type DecodedPostToolUse<T extends SupportedToolName> =
 const decodeToolInput = <A>(options: {
 	readonly event: 'PreToolUse' | 'PostToolUse';
 	readonly toolName: string;
-	readonly payload: 'tool_input' | 'tool_response';
+	readonly payload: 'tool_name' | 'tool_input' | 'tool_response';
 	readonly value: unknown;
 	readonly decode: (value: unknown) => A;
 }): Effect.Effect<A, HookToolDecodeError> =>
@@ -229,6 +229,24 @@ const decodeToolInput = <A>(options: {
 			})
 	});
 
+const ensureToolName = (options: {
+	readonly event: 'PreToolUse' | 'PostToolUse';
+	readonly expected: string;
+	readonly actual: string;
+}): Effect.Effect<void, HookToolDecodeError> =>
+	options.actual === options.expected
+		? Effect.void
+		: Effect.fail(
+				new HookToolDecodeError({
+					event: options.event,
+					toolName: options.expected,
+					payload: 'tool_name',
+					cause: new Error(
+						`Expected tool_name ${JSON.stringify(options.expected)}, received ${JSON.stringify(options.actual)}`
+					)
+				})
+		  );
+
 /**
  * Decode a `PreToolUse` payload with a custom adapter.
  *
@@ -239,13 +257,22 @@ export const decodePreToolUseWith = <TName extends string, TTool>(
 	adapter: PreToolAdapter<TName, TTool>,
 	input: PreToolUse.Input
 ): Effect.Effect<DecodedPreToolUseWith<TTool>, HookToolDecodeError> =>
-	decodeToolInput({
+	ensureToolName({
 		event: 'PreToolUse',
-		toolName: adapter.toolName,
-		payload: 'tool_input',
-		value: input.tool_input,
-		decode: Schema.decodeUnknownSync(adapter.inputSchema)
-	}).pipe(Effect.map((tool) => ({ input, tool })));
+		expected: adapter.toolName,
+		actual: input.tool_name
+	}).pipe(
+		Effect.flatMap(() =>
+			decodeToolInput({
+				event: 'PreToolUse',
+				toolName: adapter.toolName,
+				payload: 'tool_input',
+				value: input.tool_input,
+				decode: Schema.decodeUnknownSync(adapter.inputSchema)
+			})
+		),
+		Effect.map((tool) => ({ input, tool }))
+	);
 
 /**
  * Decode a `PostToolUse` payload with a custom adapter.
@@ -260,22 +287,31 @@ export const decodePostToolUseWith = <TName extends string, TTool, TResponse>(
 	DecodedPostToolUseWith<TTool, TResponse>,
 	HookToolDecodeError
 > =>
-	Effect.all({
-		tool: decodeToolInput({
-			event: 'PostToolUse',
-			toolName: adapter.toolName,
-			payload: 'tool_input',
-			value: input.tool_input,
-			decode: Schema.decodeUnknownSync(adapter.inputSchema)
-		}),
-		response: decodeToolInput({
-			event: 'PostToolUse',
-			toolName: adapter.toolName,
-			payload: 'tool_response',
-			value: input.tool_response,
-			decode: Schema.decodeUnknownSync(adapter.responseSchema)
-		})
-	}).pipe(Effect.map(({ tool, response }) => ({ input, tool, response })));
+	ensureToolName({
+		event: 'PostToolUse',
+		expected: adapter.toolName,
+		actual: input.tool_name
+	}).pipe(
+		Effect.flatMap(() =>
+			Effect.all({
+				tool: decodeToolInput({
+					event: 'PostToolUse',
+					toolName: adapter.toolName,
+					payload: 'tool_input',
+					value: input.tool_input,
+					decode: Schema.decodeUnknownSync(adapter.inputSchema)
+				}),
+				response: decodeToolInput({
+					event: 'PostToolUse',
+					toolName: adapter.toolName,
+					payload: 'tool_response',
+					value: input.tool_response,
+					decode: Schema.decodeUnknownSync(adapter.responseSchema)
+				})
+			})
+		),
+		Effect.map(({ tool, response }) => ({ input, tool, response }))
+	);
 
 /**
  * Decode the typed payload for a supported `PreToolUse` tool event.

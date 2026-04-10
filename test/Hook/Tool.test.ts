@@ -132,6 +132,59 @@ describe('Hook.Tool decoders', () => {
 			expect(decoded.response.status).toBe('ok');
 		})
 	);
+
+	it.effect('fails when a pre-tool decoder is asked for the wrong tool name', () =>
+		Effect.gen(function* () {
+			const error = yield* Effect.flip(
+				Tool.decodePreToolUse(
+					'Bash',
+					new PreToolUse.Input({
+						session_id: 'session-1',
+						transcript_path: '/tmp/t.jsonl',
+						cwd: '/tmp/ws',
+						hook_event_name: 'PreToolUse',
+						permission_mode: 'default',
+						tool_name: 'Read',
+						tool_input: { file_path: '/tmp/a.ts' },
+						tool_use_id: 'call-1'
+					})
+				)
+			);
+
+			expect(error).toMatchObject({
+				_tag: 'HookToolDecodeError',
+				toolName: 'Bash',
+				payload: 'tool_name'
+			});
+		})
+	);
+
+	it.effect('fails when a post-tool decoder is asked for the wrong tool name', () =>
+		Effect.gen(function* () {
+			const error = yield* Effect.flip(
+				Tool.decodePostToolUse(
+					'Read',
+					new PostToolUse.Input({
+						session_id: 'session-1',
+						transcript_path: '/tmp/t.jsonl',
+						cwd: '/tmp/ws',
+						hook_event_name: 'PostToolUse',
+						permission_mode: 'default',
+						tool_name: 'Bash',
+						tool_input: { command: 'ls -la' },
+						tool_response: { output: 'ok', exit_code: 0 },
+						tool_use_id: 'call-1'
+					})
+				)
+			);
+
+			expect(error).toMatchObject({
+				_tag: 'HookToolDecodeError',
+				toolName: 'Read',
+				payload: 'tool_name'
+			});
+		})
+	);
 });
 
 // ---------------------------------------------------------------------------

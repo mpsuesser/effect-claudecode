@@ -264,6 +264,34 @@ describe('Plugin.load', () => {
 		)
 	);
 
+	it.effect('ignores stray files in the fallback skills directory scan', () =>
+		Effect.gen(function* () {
+			const loaded = yield* Plugin.load('/plugin');
+
+			expect(loaded.skills).toHaveLength(1);
+			expect(loaded.skills[0]).toMatchObject({
+				name: 'greet',
+				path: 'skills/greet/SKILL.md'
+			});
+		}).pipe(
+			Effect.provide(
+				Testing.makeMockFileSystem(
+					fsWith([
+						[
+							'/plugin/skills/greet/SKILL.md',
+							'---\nname: greet\ndescription: Say hi\n---\n\n# Greet\n'
+						],
+						[
+							'/plugin/skills/README.md',
+							'# Not a skill directory\n'
+						]
+					])
+				)
+				.layer
+			)
+		)
+	);
+
 	it.effect('wraps component decode failures in PluginLoadError', () =>
 		Effect.gen(function* () {
 			const raised = yield* Effect.flip(Plugin.load('/plugin'));
