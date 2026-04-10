@@ -131,10 +131,76 @@ export const define = (config: {
  * @category Constructors
  * @since 0.1.0
  */
-export const onTool = <T extends Tool.SupportedToolName>(config: {
-	readonly toolName: T;
+type BashOnToolConfig = {
+	readonly toolName: 'Bash';
 	readonly handler: (
-		input: Tool.DecodedPostToolUse<T>
+		input: Tool.DecodedPostToolUse<'Bash'>
+	) => Effect.Effect<Output, unknown, HookContext.Service>;
+	readonly onMismatch?: (
+		input: Input
+	) => Effect.Effect<Output, unknown, HookContext.Service>;
+	readonly onDecodeError?: (
+		error: HookToolDecodeError,
+		input: Input
+	) => Effect.Effect<Output, unknown, HookContext.Service>;
+};
+
+type ReadOnToolConfig = {
+	readonly toolName: 'Read';
+	readonly handler: (
+		input: Tool.DecodedPostToolUse<'Read'>
+	) => Effect.Effect<Output, unknown, HookContext.Service>;
+	readonly onMismatch?: (
+		input: Input
+	) => Effect.Effect<Output, unknown, HookContext.Service>;
+	readonly onDecodeError?: (
+		error: HookToolDecodeError,
+		input: Input
+	) => Effect.Effect<Output, unknown, HookContext.Service>;
+};
+
+type OnToolConfig = BashOnToolConfig | ReadOnToolConfig;
+
+export function onTool(config: BashOnToolConfig): HookDefinition<Input, Output>;
+export function onTool(config: ReadOnToolConfig): HookDefinition<Input, Output>;
+export function onTool(config: OnToolConfig): HookDefinition<Input, Output> {
+	return define({
+		handler: (input): Effect.Effect<Output, unknown, HookContext.Service> => {
+			if (input.tool_name !== config.toolName) {
+				return config.onMismatch?.(input) ?? Effect.succeed(passthrough());
+			}
+			return config.toolName === 'Bash'
+				? Tool.decodePostToolUse('Bash', input).pipe(
+						Effect.flatMap(config.handler),
+						Effect.catch((error) =>
+							error instanceof HookToolDecodeError
+								? config.onDecodeError?.(error, input) ?? Effect.fail(error)
+								: Effect.fail(error)
+						)
+				  )
+				: Tool.decodePostToolUse('Read', input).pipe(
+						Effect.flatMap(config.handler),
+						Effect.catch((error) =>
+							error instanceof HookToolDecodeError
+								? config.onDecodeError?.(error, input) ?? Effect.fail(error)
+								: Effect.fail(error)
+						)
+				  );
+		}
+	});
+}
+
+/**
+ * Build a PostToolUse hook from a custom typed tool adapter.
+ * Non-matching tool invocations default to `passthrough()`.
+ *
+ * @category Constructors
+ * @since 0.1.0
+ */
+export const onAdapter = <TName extends string, TTool, TResponse>(config: {
+	readonly adapter: Tool.PostToolAdapter<TName, TTool, TResponse>;
+	readonly handler: (
+		input: Tool.DecodedPostToolUseWith<TTool, TResponse>
 	) => Effect.Effect<Output, unknown, HookContext.Service>;
 	readonly onMismatch?: (
 		input: Input
@@ -146,10 +212,10 @@ export const onTool = <T extends Tool.SupportedToolName>(config: {
 }): HookDefinition<Input, Output> =>
 	define({
 		handler: (input): Effect.Effect<Output, unknown, HookContext.Service> => {
-			if (input.tool_name !== config.toolName) {
+			if (input.tool_name !== config.adapter.toolName) {
 				return config.onMismatch?.(input) ?? Effect.succeed(passthrough());
 			}
-			return Tool.decodePostToolUse(config.toolName, input).pipe(
+			return Tool.decodePostToolUseWith(config.adapter, input).pipe(
 				Effect.flatMap(config.handler),
 				Effect.catch((error) =>
 					error instanceof HookToolDecodeError

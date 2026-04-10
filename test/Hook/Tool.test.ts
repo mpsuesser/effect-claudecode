@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from '@effect/vitest';
 import * as Effect from 'effect/Effect';
+import * as Schema from 'effect/Schema';
 
 import * as PostToolUse from '../../src/Hook/Events/PostToolUse.ts';
 import * as PreToolUse from '../../src/Hook/Events/PreToolUse.ts';
@@ -43,6 +44,22 @@ const makePostToolUseJson = (
 		tool_response: toolResponse,
 		tool_use_id: 'call-1'
 	});
+
+class EditToolInput extends Schema.Class<EditToolInput>('EditToolInput')({
+	file_path: Schema.String,
+	old_string: Schema.String,
+	new_string: Schema.String
+}) {}
+
+class EditToolResponse extends Schema.Class<EditToolResponse>('EditToolResponse')({
+	status: Schema.String
+}) {}
+
+const EditAdapter = Tool.definePostAdapter({
+	toolName: 'Edit',
+	inputSchema: EditToolInput,
+	responseSchema: EditToolResponse
+});
 
 // ---------------------------------------------------------------------------
 // Decoder helpers
@@ -85,6 +102,34 @@ describe('Hook.Tool decoders', () => {
 			expect(decoded.response).toBeInstanceOf(Tool.ReadToolResponse);
 			expect(decoded.tool.file_path).toBe('/tmp/a.ts');
 			expect(decoded.response.content).toBe('hello');
+		})
+	);
+
+	it.effect('decodes a custom post-tool adapter payload', () =>
+		Effect.gen(function* () {
+			const decoded = yield* Tool.decodePostToolUseWith(
+				EditAdapter,
+				new PostToolUse.Input({
+					session_id: 'session-1',
+					transcript_path: '/tmp/t.jsonl',
+					cwd: '/tmp/ws',
+					hook_event_name: 'PostToolUse',
+					permission_mode: 'default',
+					tool_name: 'Edit',
+					tool_input: {
+						file_path: '/tmp/a.ts',
+						old_string: 'before',
+						new_string: 'after'
+					},
+					tool_response: { status: 'ok' },
+					tool_use_id: 'call-1'
+				})
+			);
+
+			expect(decoded.tool).toBeInstanceOf(EditToolInput);
+			expect(decoded.response).toBeInstanceOf(EditToolResponse);
+			expect(decoded.tool.new_string).toBe('after');
+			expect(decoded.response.status).toBe('ok');
 		})
 	);
 });
@@ -139,6 +184,37 @@ describe('Hook.PreToolUse.onTool', () => {
 			});
 		})
 	);
+
+	it.effect('invokes a custom adapter handler for matching tool names', () =>
+		Effect.gen(function* () {
+			const hook = PreToolUse.onAdapter({
+				adapter: EditAdapter,
+				handler: ({ tool }) =>
+					Effect.succeed(
+						tool.file_path.endsWith('.ts')
+							? PreToolUse.deny('typed Edit adapter matched')
+							: PreToolUse.allow()
+					)
+			});
+
+			const result = yield* Testing.runHookWithMockStdin(
+				hook,
+				makePreToolUseJson('Edit', {
+					file_path: '/tmp/a.ts',
+					old_string: 'before',
+					new_string: 'after'
+				})
+			);
+
+			expect(result.exitCode).toBe(0);
+			expect(result.output).toMatchObject({
+				hookSpecificOutput: {
+					permissionDecision: 'deny',
+					permissionDecisionReason: 'typed Edit adapter matched'
+				}
+			});
+		})
+	);
 });
 
 describe('Hook.PostToolUse.onTool', () => {
@@ -188,6 +264,40 @@ describe('Hook.PostToolUse.onTool', () => {
 			expect(result.output).toMatchObject({
 				decision: 'block',
 				reason: 'invalid Read payload'
+			});
+		})
+	);
+
+	it.effect('invokes a custom adapter handler for matching tool names', () =>
+		Effect.gen(function* () {
+			const hook = PostToolUse.onAdapter({
+				adapter: EditAdapter,
+				handler: ({ tool, response }) =>
+					Effect.succeed(
+						PostToolUse.addContext(
+							`${tool.file_path}:${response.status}`
+						)
+					)
+			});
+
+			const result = yield* Testing.runHookWithMockStdin(
+				hook,
+				makePostToolUseJson(
+					'Edit',
+					{
+						file_path: '/tmp/a.ts',
+						old_string: 'before',
+						new_string: 'after'
+					},
+					{ status: 'ok' }
+				)
+			);
+
+			expect(result.exitCode).toBe(0);
+			expect(result.output).toMatchObject({
+				hookSpecificOutput: {
+					additionalContext: '/tmp/a.ts:ok'
+				}
 			});
 		})
 	);

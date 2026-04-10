@@ -219,10 +219,76 @@ export const define = (config: {
  * @category Constructors
  * @since 0.1.0
  */
-export const onTool = <T extends Tool.SupportedToolName>(config: {
-	readonly toolName: T;
+type BashOnToolConfig = {
+	readonly toolName: 'Bash';
 	readonly handler: (
-		input: Tool.DecodedPreToolUse<T>
+		input: Tool.DecodedPreToolUse<'Bash'>
+	) => Effect.Effect<Output, unknown, HookContext.Service>;
+	readonly onMismatch?: (
+		input: Input
+	) => Effect.Effect<Output, unknown, HookContext.Service>;
+	readonly onDecodeError?: (
+		error: HookToolDecodeError,
+		input: Input
+	) => Effect.Effect<Output, unknown, HookContext.Service>;
+};
+
+type ReadOnToolConfig = {
+	readonly toolName: 'Read';
+	readonly handler: (
+		input: Tool.DecodedPreToolUse<'Read'>
+	) => Effect.Effect<Output, unknown, HookContext.Service>;
+	readonly onMismatch?: (
+		input: Input
+	) => Effect.Effect<Output, unknown, HookContext.Service>;
+	readonly onDecodeError?: (
+		error: HookToolDecodeError,
+		input: Input
+	) => Effect.Effect<Output, unknown, HookContext.Service>;
+};
+
+type OnToolConfig = BashOnToolConfig | ReadOnToolConfig;
+
+export function onTool(config: BashOnToolConfig): HookDefinition<Input, Output>;
+export function onTool(config: ReadOnToolConfig): HookDefinition<Input, Output>;
+export function onTool(config: OnToolConfig): HookDefinition<Input, Output> {
+	return define({
+		handler: (input): Effect.Effect<Output, unknown, HookContext.Service> => {
+			if (input.tool_name !== config.toolName) {
+				return config.onMismatch?.(input) ?? Effect.succeed(allow());
+			}
+			return config.toolName === 'Bash'
+				? Tool.decodePreToolUse('Bash', input).pipe(
+						Effect.flatMap(config.handler),
+						Effect.catch((error) =>
+							error instanceof HookToolDecodeError
+								? config.onDecodeError?.(error, input) ?? Effect.fail(error)
+								: Effect.fail(error)
+						)
+				  )
+				: Tool.decodePreToolUse('Read', input).pipe(
+						Effect.flatMap(config.handler),
+						Effect.catch((error) =>
+							error instanceof HookToolDecodeError
+								? config.onDecodeError?.(error, input) ?? Effect.fail(error)
+								: Effect.fail(error)
+						)
+				  );
+		}
+	});
+}
+
+/**
+ * Build a PreToolUse hook from a custom typed tool adapter.
+ * Non-matching tool invocations default to `allow()`.
+ *
+ * @category Constructors
+ * @since 0.1.0
+ */
+export const onAdapter = <TName extends string, TTool>(config: {
+	readonly adapter: Tool.PreToolAdapter<TName, TTool>;
+	readonly handler: (
+		input: Tool.DecodedPreToolUseWith<TTool>
 	) => Effect.Effect<Output, unknown, HookContext.Service>;
 	readonly onMismatch?: (
 		input: Input
@@ -234,10 +300,10 @@ export const onTool = <T extends Tool.SupportedToolName>(config: {
 }): HookDefinition<Input, Output> =>
 	define({
 		handler: (input): Effect.Effect<Output, unknown, HookContext.Service> => {
-			if (input.tool_name !== config.toolName) {
+			if (input.tool_name !== config.adapter.toolName) {
 				return config.onMismatch?.(input) ?? Effect.succeed(allow());
 			}
-			return Tool.decodePreToolUse(config.toolName, input).pipe(
+			return Tool.decodePreToolUseWith(config.adapter, input).pipe(
 				Effect.flatMap(config.handler),
 				Effect.catch((error) =>
 					error instanceof HookToolDecodeError

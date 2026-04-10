@@ -16,6 +16,59 @@ import type * as PostToolUse from './Events/PostToolUse.ts';
 import type * as PreToolUse from './Events/PreToolUse.ts';
 
 // ---------------------------------------------------------------------------
+// Adapter models
+// ---------------------------------------------------------------------------
+
+/**
+ * Typed adapter for decoding a `tool_input` payload.
+ *
+ * @category Models
+ * @since 0.1.0
+ */
+export interface PreToolAdapter<TName extends string, TTool> {
+	readonly toolName: TName;
+	readonly inputSchema: Schema.Decoder<TTool>;
+}
+
+/**
+ * Typed adapter for decoding both `tool_input` and `tool_response` payloads.
+ *
+ * @category Models
+ * @since 0.1.0
+ */
+export interface PostToolAdapter<TName extends string, TTool, TResponse>
+	extends PreToolAdapter<TName, TTool> {
+	readonly responseSchema: Schema.Decoder<TResponse>;
+}
+
+/**
+ * Define a typed pre-tool adapter from a schema.
+ *
+ * @category Constructors
+ * @since 0.1.0
+ */
+export const definePreAdapter = <const TName extends string, TTool>(config: {
+	readonly toolName: TName;
+	readonly inputSchema: Schema.Decoder<TTool>;
+}): PreToolAdapter<TName, TTool> => config;
+
+/**
+ * Define a typed post-tool adapter from input / response schemas.
+ *
+ * @category Constructors
+ * @since 0.1.0
+ */
+export const definePostAdapter = <
+	const TName extends string,
+	TTool,
+	TResponse
+>(config: {
+	readonly toolName: TName;
+	readonly inputSchema: Schema.Decoder<TTool>;
+	readonly responseSchema: Schema.Decoder<TResponse>;
+}): PostToolAdapter<TName, TTool, TResponse> => config;
+
+// ---------------------------------------------------------------------------
 // Supported tool payload schemas
 // ---------------------------------------------------------------------------
 
@@ -65,6 +118,30 @@ export class ReadToolResponse extends Schema.Class<ReadToolResponse>(
 }) {}
 
 /**
+ * Built-in adapter for the `Bash` tool.
+ *
+ * @category Adapters
+ * @since 0.1.0
+ */
+export const BashAdapter = definePostAdapter({
+	toolName: 'Bash',
+	inputSchema: BashToolInput,
+	responseSchema: BashToolResponse
+});
+
+/**
+ * Built-in adapter for the `Read` tool.
+ *
+ * @category Adapters
+ * @since 0.1.0
+ */
+export const ReadAdapter = definePostAdapter({
+	toolName: 'Read',
+	inputSchema: ReadToolInput,
+	responseSchema: ReadToolResponse
+});
+
+/**
  * Tool names with built-in typed adapters.
  *
  * @category Schemas
@@ -96,10 +173,19 @@ interface PostToolTypeMap {
  * @category Models
  * @since 0.1.0
  */
-export type DecodedPreToolUse<T extends SupportedToolName> = {
+export type DecodedPreToolUseWith<TTool> = {
 	readonly input: PreToolUse.Input;
-	readonly tool: PreToolTypeMap[T];
+	readonly tool: TTool;
 };
+
+/**
+ * Decoded typed view over a built-in `PreToolUse` payload.
+ *
+ * @category Models
+ * @since 0.1.0
+ */
+export type DecodedPreToolUse<T extends SupportedToolName> =
+	DecodedPreToolUseWith<PreToolTypeMap[T]>;
 
 /**
  * Decoded typed view over a `PostToolUse` payload.
@@ -107,9 +193,23 @@ export type DecodedPreToolUse<T extends SupportedToolName> = {
  * @category Models
  * @since 0.1.0
  */
-export type DecodedPostToolUse<T extends SupportedToolName> = {
+export type DecodedPostToolUseWith<TTool, TResponse> = {
 	readonly input: PostToolUse.Input;
-} & PostToolTypeMap[T];
+	readonly tool: TTool;
+	readonly response: TResponse;
+};
+
+/**
+ * Decoded typed view over a built-in `PostToolUse` payload.
+ *
+ * @category Models
+ * @since 0.1.0
+ */
+export type DecodedPostToolUse<T extends SupportedToolName> =
+	DecodedPostToolUseWith<
+		PostToolTypeMap[T]['tool'],
+		PostToolTypeMap[T]['response']
+	>;
 
 const decodeToolInput = <A>(options: {
 	readonly event: 'PreToolUse' | 'PostToolUse';
@@ -129,10 +229,53 @@ const decodeToolInput = <A>(options: {
 			})
 	});
 
-const decodeBashToolInput = Schema.decodeUnknownSync(BashToolInput);
-const decodeBashToolResponse = Schema.decodeUnknownSync(BashToolResponse);
-const decodeReadToolInput = Schema.decodeUnknownSync(ReadToolInput);
-const decodeReadToolResponse = Schema.decodeUnknownSync(ReadToolResponse);
+/**
+ * Decode a `PreToolUse` payload with a custom adapter.
+ *
+ * @category Decoding
+ * @since 0.1.0
+ */
+export const decodePreToolUseWith = <TName extends string, TTool>(
+	adapter: PreToolAdapter<TName, TTool>,
+	input: PreToolUse.Input
+): Effect.Effect<DecodedPreToolUseWith<TTool>, HookToolDecodeError> =>
+	decodeToolInput({
+		event: 'PreToolUse',
+		toolName: adapter.toolName,
+		payload: 'tool_input',
+		value: input.tool_input,
+		decode: Schema.decodeUnknownSync(adapter.inputSchema)
+	}).pipe(Effect.map((tool) => ({ input, tool })));
+
+/**
+ * Decode a `PostToolUse` payload with a custom adapter.
+ *
+ * @category Decoding
+ * @since 0.1.0
+ */
+export const decodePostToolUseWith = <TName extends string, TTool, TResponse>(
+	adapter: PostToolAdapter<TName, TTool, TResponse>,
+	input: PostToolUse.Input
+): Effect.Effect<
+	DecodedPostToolUseWith<TTool, TResponse>,
+	HookToolDecodeError
+> =>
+	Effect.all({
+		tool: decodeToolInput({
+			event: 'PostToolUse',
+			toolName: adapter.toolName,
+			payload: 'tool_input',
+			value: input.tool_input,
+			decode: Schema.decodeUnknownSync(adapter.inputSchema)
+		}),
+		response: decodeToolInput({
+			event: 'PostToolUse',
+			toolName: adapter.toolName,
+			payload: 'tool_response',
+			value: input.tool_response,
+			decode: Schema.decodeUnknownSync(adapter.responseSchema)
+		})
+	}).pipe(Effect.map(({ tool, response }) => ({ input, tool, response })));
 
 /**
  * Decode the typed payload for a supported `PreToolUse` tool event.
@@ -140,29 +283,22 @@ const decodeReadToolResponse = Schema.decodeUnknownSync(ReadToolResponse);
  * @category Decoding
  * @since 0.1.0
  */
-export const decodePreToolUse = <T extends SupportedToolName>(
-	toolName: T,
+export function decodePreToolUse(
+	toolName: 'Bash',
 	input: PreToolUse.Input
-): Effect.Effect<DecodedPreToolUse<T>, HookToolDecodeError> =>
-	toolName === 'Bash'
-		? decodeToolInput({
-				event: 'PreToolUse',
-				toolName,
-				payload: 'tool_input',
-				value: input.tool_input,
-				decode: decodeBashToolInput
-		  }).pipe(
-				Effect.map((tool) => ({ input, tool }))
-			) as never
-		: decodeToolInput({
-				event: 'PreToolUse',
-				toolName,
-				payload: 'tool_input',
-				value: input.tool_input,
-				decode: decodeReadToolInput
-		  }).pipe(
-				Effect.map((tool) => ({ input, tool }))
-			) as never;
+): Effect.Effect<DecodedPreToolUse<'Bash'>, HookToolDecodeError>;
+export function decodePreToolUse(
+	toolName: 'Read',
+	input: PreToolUse.Input
+): Effect.Effect<DecodedPreToolUse<'Read'>, HookToolDecodeError>;
+export function decodePreToolUse(
+	toolName: SupportedToolName,
+	input: PreToolUse.Input
+): Effect.Effect<DecodedPreToolUse<SupportedToolName>, HookToolDecodeError> {
+	return toolName === 'Bash'
+		? decodePreToolUseWith(BashAdapter, input)
+		: decodePreToolUseWith(ReadAdapter, input);
+}
 
 /**
  * Decode the typed payload for a supported `PostToolUse` tool event.
@@ -170,44 +306,19 @@ export const decodePreToolUse = <T extends SupportedToolName>(
  * @category Decoding
  * @since 0.1.0
  */
-export const decodePostToolUse = <T extends SupportedToolName>(
-	toolName: T,
+export function decodePostToolUse(
+	toolName: 'Bash',
 	input: PostToolUse.Input
-): Effect.Effect<DecodedPostToolUse<T>, HookToolDecodeError> =>
-	toolName === 'Bash'
-		? Effect.all({
-				tool: decodeToolInput({
-					event: 'PostToolUse',
-					toolName,
-					payload: 'tool_input',
-					value: input.tool_input,
-					decode: decodeBashToolInput
-				}),
-				response: decodeToolInput({
-					event: 'PostToolUse',
-					toolName,
-					payload: 'tool_response',
-					value: input.tool_response,
-					decode: decodeBashToolResponse
-				})
-		  }).pipe(
-				Effect.map(({ tool, response }) => ({ input, tool, response }))
-			) as never
-		: Effect.all({
-				tool: decodeToolInput({
-					event: 'PostToolUse',
-					toolName,
-					payload: 'tool_input',
-					value: input.tool_input,
-					decode: decodeReadToolInput
-				}),
-				response: decodeToolInput({
-					event: 'PostToolUse',
-					toolName,
-					payload: 'tool_response',
-					value: input.tool_response,
-					decode: decodeReadToolResponse
-				})
-		  }).pipe(
-				Effect.map(({ tool, response }) => ({ input, tool, response }))
-			) as never;
+): Effect.Effect<DecodedPostToolUse<'Bash'>, HookToolDecodeError>;
+export function decodePostToolUse(
+	toolName: 'Read',
+	input: PostToolUse.Input
+): Effect.Effect<DecodedPostToolUse<'Read'>, HookToolDecodeError>;
+export function decodePostToolUse(
+	toolName: SupportedToolName,
+	input: PostToolUse.Input
+): Effect.Effect<DecodedPostToolUse<SupportedToolName>, HookToolDecodeError> {
+	return toolName === 'Bash'
+		? decodePostToolUseWith(BashAdapter, input)
+		: decodePostToolUseWith(ReadAdapter, input);
+}
