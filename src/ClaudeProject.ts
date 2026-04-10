@@ -7,6 +7,7 @@
  *
  * @since 0.1.0
  */
+import * as Context from 'effect/Context';
 import { Duration } from 'effect';
 import * as Arr from 'effect/Array';
 import * as Effect from 'effect/Effect';
@@ -14,7 +15,6 @@ import * as FileSystem from 'effect/FileSystem';
 import * as Layer from 'effect/Layer';
 import * as Option from 'effect/Option';
 import * as Path from 'effect/Path';
-import * as ServiceMap from 'effect/ServiceMap';
 
 import { McpConfigError } from './Errors.ts';
 import * as Mcp from './Mcp.ts';
@@ -88,7 +88,7 @@ export namespace ClaudeProject {
 	 * @category Service
 	 * @since 0.1.0
 	 */
-	export class Service extends ServiceMap.Service<Service, Interface>()(
+	export class Service extends Context.Service<Service, Interface>()(
 		'effect-claudecode/ClaudeProject'
 	) {}
 

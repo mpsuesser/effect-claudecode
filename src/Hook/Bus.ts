@@ -7,10 +7,10 @@
  *
  * @since 0.1.0
  */
+import * as Context from 'effect/Context';
 import * as Effect from 'effect/Effect';
 import * as Layer from 'effect/Layer';
 import * as PubSub from 'effect/PubSub';
-import * as ServiceMap from 'effect/ServiceMap';
 import * as Stream from 'effect/Stream';
 
 import type * as Events from './Events/index.ts';
@@ -41,7 +41,7 @@ export namespace HookBus {
 	 * @category Service
 	 * @since 0.1.0
 	 */
-	export class Service extends ServiceMap.Service<Service, Interface>()(
+	export class Service extends Context.Service<Service, Interface>()(
 		'effect-claudecode/HookBus'
 	) {}
 

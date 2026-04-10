@@ -79,7 +79,7 @@ const defaultEnvelopeFields = {
 export const makeMockEnvelope = (
 	overrides?: Partial<HookEnvelope>
 ): HookEnvelope =>
-	HookEnvelope.makeUnsafe(
+	HookEnvelope.make(
 		overrides === undefined
 			? defaultEnvelopeFields
 			: { ...defaultEnvelopeFields, ...overrides }

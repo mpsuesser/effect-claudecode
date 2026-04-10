@@ -7,6 +7,7 @@
  *
  * @since 0.1.0
  */
+import * as Context from 'effect/Context';
 import { describe, expect, it } from '@effect/vitest';
 import * as ConfigProvider from 'effect/ConfigProvider';
 import * as Effect from 'effect/Effect';
@@ -15,7 +16,6 @@ import * as Layer from 'effect/Layer';
 import * as Option from 'effect/Option';
 import * as Path from 'effect/Path';
 import * as PlatformError from 'effect/PlatformError';
-import * as ServiceMap from 'effect/ServiceMap';
 
 import * as ClaudeProject from '../src/ClaudeProject.ts';
 import * as ClaudeRuntime from '../src/ClaudeRuntime.ts';
@@ -77,7 +77,7 @@ const makeCapture = (options?: {
 	};
 };
 
-class ExtraService extends ServiceMap.Service<
+class ExtraService extends Context.Service<
 	ExtraService,
 	{
 		readonly value: string;

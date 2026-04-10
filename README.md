@@ -4,34 +4,14 @@ Write [Claude Code](https://code.claude.com) plugins — hooks, skills, subagent
 
 `effect-claudecode` wraps Claude Code's plugin primitives (stdio hook processes, `.claude/settings.json`, `plugin.json` manifests, frontmatter files, `.mcp.json`) in Effect idioms, so plugin authors get typed input/output schemas for all 26 hook events, Effect-native handlers with injected context, decision constructors per event, correct stdio/exit-code semantics for free, and higher-level runtime helpers for shared project state — no more hand-parsing snake_case JSON or gluing `process.exit` calls together.
 
-The examples below keep `Effect.run*` at the runtime boundary and keep the actual hook logic inside `Effect.gen` blocks with `yield*`, injected services, and Effect-native logging.
-
-`effect-claudecode` publishes compiled ESM and `.d.ts` files to npm. Bun is still the shortest path, but Bun is not required.
-
-## Who It's For
-
-- You already write Effect v4 code and want Claude Code's plugin surface to feel like the rest of your Effect stack.
-- You want typed hook input/output schemas, service-backed context access, tagged errors, and reusable runtime presets instead of one-off stdio scripts.
-- You prefer Bun, or at least do not mind using Effect's Node platform services directly when you are not on Bun.
-
-## Start Here
-
-- [Install](#install)
-- [Runtime choices](#runtime-choices)
-- [A single PreToolUse hook](#a-single-pretooluse-hook)
-- [A complete plugin via `Plugin.define` + `Plugin.write`](#a-complete-plugin-via-plugindefine--pluginwrite)
-- [Shared runtime for non-hook programs](#shared-runtime-for-non-hook-programs)
-- [Testing](#testing)
-- [Full API reference](#hooks)
-
 ## Install
 
 ```sh
-npm install effect-claudecode effect@4.0.0-beta.43 @effect/platform-node-shared@4.0.0-beta.43
+npm install effect-claudecode effect@4.0.0-beta.46 @effect/platform-node-shared@4.0.0-beta.46
 ```
 
 ```sh
-bun add effect-claudecode effect@4.0.0-beta.43 @effect/platform-node-shared@4.0.0-beta.43
+bun add effect-claudecode effect@4.0.0-beta.46 @effect/platform-node-shared@4.0.0-beta.46
 ```
 
 If you want to run TypeScript hook files under Node without precompiling them, add a TS runner such as `tsx`:
@@ -41,14 +21,6 @@ npm install -D tsx
 ```
 
 `effect` and `@effect/platform-node-shared` are peer dependencies. `platform-node-shared` provides the `runMain` + stdio plumbing the hook runner delegates to; it is the shared base that both `@effect/platform-node` and `@effect/platform-bun` build on, so hooks run identically under Node and Bun.
-
-## Runtime Choices
-
-- Bun: write TypeScript hook files and point Claude Code at `bun ./hooks/my-hook.ts`.
-- Node + TypeScript: keep the same `.ts` hook files, but point Claude Code at `tsx ./hooks/my-hook.ts`.
-- Node + JavaScript: compile your hook scripts ahead of time and point Claude Code at `node ./hooks/my-hook.js`.
-
-The library itself does not require Bun. Bun is simply the nicest zero-friction path when you want to keep hook scripts as TypeScript files.
 
 ## Quick Start
 
@@ -230,6 +202,14 @@ await runtime.dispose();
 ```
 
 Use `ClaudeRuntime.plugin({ cwd, pluginRoot })` when the script should treat a plugin directory as the source of truth for plugin scans and named component lookups. `ClaudeRuntime.default()` remains the right choice for platform-only scripts like one-shot plugin builders.
+
+## Runtime Choices
+
+- Bun: write TypeScript hook files and point Claude Code at `bun ./hooks/my-hook.ts`.
+- Node + TypeScript: keep the same `.ts` hook files, but point Claude Code at `tsx ./hooks/my-hook.ts`.
+- Node + JavaScript: compile your hook scripts ahead of time and point Claude Code at `node ./hooks/my-hook.js`.
+
+The library itself does not require Bun. Bun is simply the nicest zero-friction path when you want to keep hook scripts as TypeScript files.
 
 ## Features
 

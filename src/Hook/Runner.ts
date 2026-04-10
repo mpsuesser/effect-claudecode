@@ -160,7 +160,7 @@ const runHookFromParsed = <In extends HookEnvelope, Out>(
 		yield* Effect.logDebug('running hook handler').pipe(
 			Effect.annotateLogs({ hookEventName: input.hook_event_name })
 		);
-		const envelope = HookEnvelope.makeUnsafe({
+		const envelope = HookEnvelope.make({
 			session_id: input.session_id,
 			transcript_path: input.transcript_path,
 			cwd: input.cwd,
