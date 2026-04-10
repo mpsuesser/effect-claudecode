@@ -16,8 +16,9 @@ The examples below keep `Effect.run*` at the runtime boundary and keep the actua
 - **`Hook.Tool` + `Hook.PreToolUse.onTool(...)` / `Hook.PostToolUse.onTool(...)`** — typed adapters for common tool payloads like `Bash` and `Read`
 - **`HookBus`** — publish decoded hook events to a typed in-process `Stream`
 - **`ClaudeRuntime.default()`** — prewired `ManagedRuntime` for `FileSystem`, `Path`, and Effect logging in any effect-claudecode program
+- **`ClaudeRuntime.project({ cwd })` / `ClaudeRuntime.plugin({ cwd, pluginRoot })`** — reusable project-aware runtime presets that include cached `ClaudeProject` state
 - **`ClaudeProject.layer({ cwd })`** — cached project-scoped access to settings, `.mcp.json`, plugin directories, and named component lookups with explicit invalidation
-- **`Settings.load(cwd)`** — Effect loader that reads and merges enterprise/user/project/local `settings.json` files into one typed `SettingsFile`
+- **`Settings.load(cwd)`** — Effect loader that reads and merges user/project/local `settings.json` files into one typed `SettingsFile`
 - **`Plugin.define({...})` + `Plugin.write(def, dir)`** — declarative plugin builder + materializer that produces a complete plugin directory tree
 - **`Plugin.scan(dir)` / `Plugin.load(dir)` / `Plugin.sync(def)`** — inspect, round-trip, and normalize existing plugin directories
 - **`Frontmatter.parseSkillFile(path)` and friends** — one-step typed markdown loaders for skills, commands, subagents, and output styles
@@ -126,24 +127,32 @@ await runtime.dispose();
 
 ### Shared runtime for non-hook programs
 
-`ClaudeRuntime.default()` is useful for any effect-claudecode program that is not a one-shot hook entrypoint: plugin build scripts, validation tools, local diagnostics, and test harnesses. It gives you a reusable `ManagedRuntime` with the common platform wiring already in place:
+`ClaudeRuntime.default()` is the minimal preset for scripts that just need the platform services (`FileSystem`, `Path`) and Effect logging. For project-aware tooling, prefer `ClaudeRuntime.project({ cwd })`, which also wires in the cached `ClaudeProject` service:
 
 ```ts
 import * as Effect from 'effect/Effect';
+import * as Option from 'effect/Option';
 
-import { ClaudeRuntime, Plugin } from 'effect-claudecode';
+import { ClaudeProject, ClaudeRuntime } from 'effect-claudecode';
 
-const runtime = ClaudeRuntime.default();
+const runtime = ClaudeRuntime.project({ cwd: process.cwd() });
 
 const report = await runtime.runPromise(
 	Effect.gen(function* () {
-		const scanned = yield* Plugin.scan('./dist-plugin');
-		return scanned.inferredManifest.name;
+		const project = yield* ClaudeProject.project;
+		const settings = yield* project.settings;
+		const reviewSkill = yield* project.skill('review');
+		return {
+			model: settings.model,
+			hasReviewSkill: Option.isSome(reviewSkill)
+		};
 	})
 );
 
 await runtime.dispose();
 ```
+
+Use `ClaudeRuntime.plugin({ cwd, pluginRoot })` when the script should treat a plugin directory as the source of truth for plugin scans and named component lookups. `ClaudeRuntime.default()` remains the right choice for platform-only scripts like one-shot plugin builders.
 
 ## Hooks
 
@@ -349,7 +358,7 @@ Fails with `TranscriptReadError { path, cause }` on I/O failure.
 
 ## Settings
 
-`Settings.load(cwd)` reads the Claude Code settings files in priority order (enterprise → user → project → local) and returns a merged `SettingsFile`:
+`Settings.load(cwd)` reads the Claude Code settings files in priority order (user → project → local) and returns a merged `SettingsFile`:
 
 ```ts
 import * as NodeFileSystem from '@effect/platform-node-shared/NodeFileSystem';
@@ -542,7 +551,7 @@ For in-memory sources use `Frontmatter.parse(source, path)` — same return type
 
 ## ClaudeProject
 
-`ClaudeProject.layer({ cwd })` wraps the common project-level loaders in explicit caches so repeated hook invocations or local tooling can reuse parsed state until you decide to invalidate it:
+`ClaudeRuntime.project({ cwd })` is the recommended way to consume `ClaudeProject` from local tooling. It wraps the common project-level loaders in explicit caches so repeated hook invocations or diagnostics can reuse parsed state until you decide to invalidate it:
 
 ```ts
 import * as Effect from 'effect/Effect';
@@ -550,9 +559,7 @@ import * as Option from 'effect/Option';
 
 import { ClaudeProject, ClaudeRuntime } from 'effect-claudecode';
 
-const runtime = ClaudeRuntime.default({
-	layer: ClaudeProject.ClaudeProject.layer({ cwd: process.cwd() })
-});
+const runtime = ClaudeRuntime.project({ cwd: process.cwd() });
 
 const summary = await runtime.runPromise(
 	Effect.gen(function* () {
@@ -570,6 +577,16 @@ await runtime.dispose();
 ```
 
 The service exposes cached `settings`, optional cached `mcp`, cached `plugin`, name-based component lookups (`skill`, `command`, `agent`, `outputStyle`), and explicit invalidators under `project.invalidate.*`.
+
+For advanced cases, manual layer composition is still available:
+
+```ts
+import { ClaudeProject, ClaudeRuntime } from 'effect-claudecode';
+
+const runtime = ClaudeRuntime.default({
+	layer: ClaudeProject.ClaudeProject.layer({ cwd: process.cwd() })
+});
+```
 
 ## HookBus
 

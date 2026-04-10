@@ -8,16 +8,20 @@
  * @since 0.1.0
  */
 import { describe, expect, it } from '@effect/vitest';
+import * as ConfigProvider from 'effect/ConfigProvider';
 import * as Effect from 'effect/Effect';
 import * as FileSystem from 'effect/FileSystem';
 import * as Layer from 'effect/Layer';
+import * as Option from 'effect/Option';
 import * as Path from 'effect/Path';
 import * as PlatformError from 'effect/PlatformError';
 import * as ServiceMap from 'effect/ServiceMap';
 
+import * as ClaudeProject from '../src/ClaudeProject.ts';
 import * as ClaudeRuntime from '../src/ClaudeRuntime.ts';
 import * as Plugin from '../src/Plugin.ts';
 import * as Settings from '../src/Settings.ts';
+import * as Testing from '../src/Testing.ts';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -28,6 +32,12 @@ interface WriteCapture {
 	readonly dirs: Set<string>;
 	readonly layer: Layer.Layer<FileSystem.FileSystem | Path.Path>;
 }
+
+const HOME = '/home/user';
+const CWD = '/repo';
+const PROJECT_SETTINGS = `${CWD}/.claude/settings.json`;
+const PLUGIN_ROOT = '/plugin';
+const SKILL_PATH = `${PLUGIN_ROOT}/skills/review/SKILL.md`;
 
 const permissionDeniedError = (path: string) =>
 	PlatformError.systemError({
@@ -85,6 +95,77 @@ describe('ClaudeRuntime', () => {
 		try {
 			const path = await runtime.runPromise(Settings.projectSettingsPath('/repo'));
 			expect(path).toBe('/repo/.claude/settings.json');
+		} finally {
+			await runtime.dispose();
+		}
+	});
+
+	it('project preset adds ClaudeProject and exposes its configured layer', async () => {
+		const fileSystem = Testing.makeMockFileSystem({
+			[PROJECT_SETTINGS]: JSON.stringify({ model: 'claude-sonnet-4-6' })
+		});
+		const runtime = ClaudeRuntime.project({
+			cwd: CWD,
+			platformLayer: fileSystem.layer,
+			layer: ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME }))
+		});
+
+		try {
+			const result = await runtime.runPromise(
+				Effect.gen(function* () {
+					const project = yield* ClaudeProject.project;
+					const settings = yield* project.settings;
+					return {
+						cwd: project.cwd,
+						model: settings.model
+					};
+				})
+			);
+
+			const viaLayer = await Effect.runPromise(
+				Effect.gen(function* () {
+					const project = yield* ClaudeProject.project;
+					return project.cwd;
+				}).pipe(Effect.provide(runtime.layer))
+			);
+
+			expect(result).toEqual({ cwd: CWD, model: 'claude-sonnet-4-6' });
+			expect(viaLayer).toBe(CWD);
+		} finally {
+			await runtime.dispose();
+		}
+	});
+
+	it('plugin preset uses pluginRoot for named component lookups', async () => {
+		const fileSystem = Testing.makeMockFileSystem({
+			[SKILL_PATH]:
+				'---\nname: review\ndescription: Review staged diffs\n---\n\n# Review\n'
+		});
+		const runtime = ClaudeRuntime.plugin({
+			cwd: CWD,
+			pluginRoot: PLUGIN_ROOT,
+			platformLayer: fileSystem.layer,
+			layer: ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME }))
+		});
+
+		try {
+			const result = await runtime.runPromise(
+				Effect.gen(function* () {
+					const project = yield* ClaudeProject.project;
+					const skill = yield* project.skill('review');
+					return {
+						cwd: project.cwd,
+						pluginRoot: project.pluginRoot,
+						hasReviewSkill: Option.isSome(skill)
+					};
+				})
+			);
+
+			expect(result).toEqual({
+				cwd: CWD,
+				pluginRoot: PLUGIN_ROOT,
+				hasReviewSkill: true
+			});
 		} finally {
 			await runtime.dispose();
 		}

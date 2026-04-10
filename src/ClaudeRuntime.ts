@@ -17,6 +17,8 @@ import * as Logger from 'effect/Logger';
 import * as ManagedRuntime from 'effect/ManagedRuntime';
 import * as Path from 'effect/Path';
 
+import * as ClaudeProject from './ClaudeProject.ts';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -61,15 +63,48 @@ export interface RuntimeOptions<R = never, E = never, EP = never> {
 }
 
 /**
+ * Runtime construction options for `ClaudeRuntime.project(...)`.
+ *
+ * Adds the cached `ClaudeProject` service for one concrete project root while
+ * preserving the same platform / logger overrides as `ClaudeRuntime.make(...)`.
+ *
+ * @category Models
+ * @since 0.1.0
+ */
+export interface ProjectRuntimeOptions<R = never, E = never, EP = never>
+	extends RuntimeOptions<R, E, EP> {
+	readonly cwd: string;
+	readonly pluginRoot?: string;
+	readonly mcpPath?: string;
+}
+
+/**
+ * Runtime construction options for `ClaudeRuntime.plugin(...)`.
+ *
+ * Like `ClaudeRuntime.project(...)`, but requires an explicit plugin root so
+ * plugin scans and named component lookups resolve against the plugin
+ * directory instead of the project root.
+ *
+ * @category Models
+ * @since 0.1.0
+ */
+export interface PluginRuntimeOptions<R = never, E = never, EP = never>
+	extends RuntimeOptions<R, E, EP> {
+	readonly cwd: string;
+	readonly pluginRoot: string;
+	readonly mcpPath?: string;
+}
+
+/**
  * Managed runtime returned by `ClaudeRuntime.make`.
  *
  * @category Models
  * @since 0.1.0
  */
-export type Runtime<R = never, E = never> = ManagedRuntime.ManagedRuntime<
-	BaseServices | R,
-	E
->;
+export interface Runtime<R = never, E = never>
+	extends ManagedRuntime.ManagedRuntime<BaseServices | R, E> {
+	readonly layer: Layer.Layer<BaseServices | R, E, never>;
+}
 
 // ---------------------------------------------------------------------------
 // Layers
@@ -131,9 +166,65 @@ export const layer = <R = never, E = never, EP = never>(
 	);
 };
 
+const mergeExtraLayer = <R = never, E = never, EP = never>(options: {
+	readonly projectLayer: Layer.Layer<ClaudeProject.ClaudeProject.Service, EP, never>;
+	readonly extraLayer?: Layer.Layer<R, E, never>;
+}): Layer.Layer<ClaudeProject.ClaudeProject.Service | R, E | EP, never> =>
+	Layer.mergeAll(options.projectLayer, options.extraLayer ?? Layer.empty);
+
+const projectRuntimeLayer = <R = never, E = never, EP = never>(
+	options: ProjectRuntimeOptions<R, E, EP>
+): Layer.Layer<BaseServices | ClaudeProject.ClaudeProject.Service | R, E | EP, never> =>
+	(() => {
+		const platformLayer = options.platformLayer ?? baseLayer;
+		const projectOptions: ClaudeProject.ClaudeProjectOptions = {
+			cwd: options.cwd,
+			...(options.pluginRoot === undefined
+				? {}
+				: { pluginRoot: options.pluginRoot }),
+			...(options.mcpPath === undefined ? {} : { mcpPath: options.mcpPath })
+		};
+		const runtimeOptions: RuntimeOptions<
+			ClaudeProject.ClaudeProject.Service | R,
+			E | EP,
+			EP
+		> = {
+			platformLayer,
+			layer: mergeExtraLayer({
+				projectLayer: ClaudeProject.ClaudeProject.layer(projectOptions).pipe(
+					Layer.provide(platformLayer)
+				),
+				...(options.layer === undefined
+					? {}
+					: { extraLayer: options.layer })
+			}),
+			...(options.logger === undefined ? {} : { logger: options.logger }),
+			...(options.mergeWithExistingLoggers === undefined
+				? {}
+				: {
+					mergeWithExistingLoggers:
+						options.mergeWithExistingLoggers
+				})
+		};
+		return layer({
+			...runtimeOptions
+		});
+	})();
+
 // ---------------------------------------------------------------------------
 // Managed runtime constructors
 // ---------------------------------------------------------------------------
+
+const fromLayer = <R = never, E = never>(
+	runtimeLayer: Layer.Layer<BaseServices | R, E, never>,
+	memoMap?: Layer.MemoMap
+): Runtime<R, E> => {
+	const runtime = ManagedRuntime.make(runtimeLayer, { memoMap });
+	return {
+		...runtime,
+		layer: runtimeLayer
+	};
+};
 
 /**
  * Create a prewired `ManagedRuntime` for effect-claudecode programs.
@@ -144,7 +235,7 @@ export const layer = <R = never, E = never, EP = never>(
 export const make = <R = never, E = never, EP = never>(
 	options?: RuntimeOptions<R, E, EP>
 ): Runtime<R, E | EP> =>
-	ManagedRuntime.make(layer(options), { memoMap: options?.memoMap });
+	fromLayer(layer(options), options?.memoMap);
 
 /**
  * Alias for `make` that highlights the default setup.
@@ -155,6 +246,37 @@ export const make = <R = never, E = never, EP = never>(
 export const defaultRuntime = <R = never, E = never, EP = never>(
 	options?: RuntimeOptions<R, E, EP>
 ): Runtime<R, E | EP> => make(options);
+
+/**
+ * Create a prewired runtime that also includes the cached `ClaudeProject`
+ * service for one project root.
+ *
+ * This is the recommended entry point for project-aware scripts that need
+ * settings, `.mcp.json`, or plugin component lookups in addition to the base
+ * platform services.
+ *
+ * @category Runtime
+ * @since 0.1.0
+ */
+export const project = <R = never, E = never, EP = never>(
+	options: ProjectRuntimeOptions<R, E, EP>
+): Runtime<ClaudeProject.ClaudeProject.Service | R, E | EP> =>
+	fromLayer(projectRuntimeLayer(options), options.memoMap);
+
+/**
+ * Create a prewired runtime for plugin-aware scripts.
+ *
+ * Compared with `ClaudeRuntime.project(...)`, this preset requires an explicit
+ * `pluginRoot` so `ClaudeProject.plugin` and named component lookups read from
+ * the plugin directory rather than the project root.
+ *
+ * @category Runtime
+ * @since 0.1.0
+ */
+export const plugin = <R = never, E = never, EP = never>(
+	options: PluginRuntimeOptions<R, E, EP>
+): Runtime<ClaudeProject.ClaudeProject.Service | R, E | EP> =>
+	project(options);
 
 /**
  * Alias retained for ergonomic call sites: `ClaudeRuntime.default(...)`.
