@@ -3,9 +3,10 @@
  * Example: assemble and write a complete Claude Code plugin directory.
  *
  * Unlike the hook examples, this script is a one-shot build tool — not
- * a hook runner. It shows how `Plugin.define` + `Plugin.write` can
- * materialize a plugin manifest, commands, skills, hooks config, and
- * `.mcp.json` to disk from a single declarative description.
+ * a hook runner. It shows how `Plugin.define`, `Plugin.validate`,
+ * `Plugin.write`, and `Plugin.doctor` compose into one Effect pipeline
+ * that materializes a plugin manifest, commands, skills, hooks config,
+ * and `.mcp.json` to disk from a single declarative description.
  *
  * Run:
  *
@@ -78,8 +79,19 @@ const plugin = Plugin.define({
 
 const destDir = process.argv[2] ?? './dist-plugin';
 
-const program = Plugin.write(plugin, destDir).pipe(
-	Effect.tap(() => Effect.logInfo(`Plugin written to ${destDir}`))
+const program = Plugin.validate(plugin).pipe(
+	Effect.flatMap(() => Plugin.write(plugin, destDir)),
+	Effect.flatMap(() => Plugin.doctor(destDir)),
+	Effect.tap((report) =>
+		Effect.logInfo('plugin materialized').pipe(
+			Effect.annotateLogs({
+				destDir,
+				errors: report.errors.length,
+				warnings: report.warnings.length
+			})
+		)
+	),
+	Effect.withLogSpan('plugin.build')
 );
 
 const runtime = ClaudeRuntime.default();

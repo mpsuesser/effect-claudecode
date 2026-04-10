@@ -55,17 +55,49 @@ The library itself does not require Bun. Bun is simply the nicest zero-friction 
 ### A single PreToolUse hook
 
 ```ts
+import * as Arr from 'effect/Array';
 import * as Effect from 'effect/Effect';
+import * as Option from 'effect/Option';
 import { Hook } from 'effect-claudecode';
+
+const destructivePatterns: ReadonlyArray<RegExp> = [
+	/rm\s+-rf\s+\//,
+	/sudo\s+rm/,
+	/dd\s+.*of=\/dev/
+];
 
 const hook = Hook.PreToolUse.onTool({
 	toolName: 'Bash',
 	handler: ({ tool }) =>
 		Effect.gen(function* () {
-			return /rm\s+-rf\s+\//.test(tool.command)
-				? Hook.PreToolUse.deny('destructive command rejected')
-				: Hook.PreToolUse.allow();
-		})
+			const sessionId = yield* Hook.sessionId;
+			const cwd = yield* Hook.cwd;
+			const matchedPattern = Arr.findFirst(
+				destructivePatterns,
+				(pattern) => pattern.test(tool.command)
+			);
+
+			return yield* Option.match(matchedPattern, {
+				onNone: () =>
+					Effect.logDebug('allowed bash command').pipe(
+						Effect.annotateLogs({ sessionId, cwd }),
+						Effect.as(Hook.PreToolUse.allow())
+					),
+				onSome: (pattern) =>
+					Effect.logWarning('blocked bash command').pipe(
+						Effect.annotateLogs({
+							sessionId,
+							cwd,
+							pattern: pattern.source
+						}),
+						Effect.as(
+							Hook.PreToolUse.deny(
+								`blocked: matches ${pattern.source}`
+							)
+						)
+					)
+			});
+		}).pipe(Effect.annotateLogs({ hook: 'PreToolUse', tool: 'Bash' }))
 });
 
 Hook.runMain(hook);
@@ -129,11 +161,24 @@ const plugin = Plugin.define({
 	}
 });
 
+const destDir = './dist-plugin';
+
 const runtime = ClaudeRuntime.default();
 
 await runtime.runPromise(
-	Plugin.write(plugin, './dist-plugin').pipe(
-		Effect.tap(() => Effect.logInfo('plugin written to ./dist-plugin'))
+	Plugin.validate(plugin).pipe(
+		Effect.flatMap(() => Plugin.write(plugin, destDir)),
+		Effect.flatMap(() => Plugin.doctor(destDir)),
+		Effect.tap((report) =>
+			Effect.logInfo('plugin materialized').pipe(
+				Effect.annotateLogs({
+					destDir,
+					errors: report.errors.length,
+					warnings: report.warnings.length
+				})
+			)
+		),
+		Effect.withLogSpan('plugin.build')
 	)
 );
 
@@ -155,13 +200,30 @@ const runtime = ClaudeRuntime.project({ cwd: process.cwd() });
 const report = await runtime.runPromise(
 	Effect.gen(function* () {
 		const project = yield* ClaudeProject.project;
-		const settings = yield* project.settings;
-		const reviewSkill = yield* project.skill('review');
+		const [settings, reviewSkill, mcp] = yield* Effect.all([
+			project.settings,
+			project.skill('review'),
+			project.mcp
+		]);
 		return {
-			model: settings.model,
-			hasReviewSkill: Option.isSome(reviewSkill)
+			model: settings.model ?? 'unset',
+			reviewSkill: Option.match(reviewSkill, {
+				onNone: () => 'missing',
+				onSome: (skill) => skill.path ?? 'present'
+			}),
+			mcp: Option.match(mcp, {
+				onNone: () => 'missing',
+				onSome: () => 'configured'
+			})
 		};
-	})
+	}).pipe(
+		Effect.tap((summary) =>
+			Effect.logInfo('project summary').pipe(
+				Effect.annotateLogs(summary)
+			)
+		),
+		Effect.withLogSpan('project.summary')
+	)
 );
 
 await runtime.dispose();
@@ -894,11 +956,11 @@ const context = Testing.makeMockHookContext({
 
 Complete runnable examples live in [`examples/`](./examples):
 
-- [`examples/pre-bash-denylist.ts`](./examples/pre-bash-denylist.ts) — PreToolUse hook that blocks destructive Bash commands via regex deny-list
+- [`examples/pre-bash-denylist.ts`](./examples/pre-bash-denylist.ts) — PreToolUse hook that blocks destructive Bash commands with `Option.match`, hook context accessors, and structured logs
 - [`examples/session-start-inject-env.ts`](./examples/session-start-inject-env.ts) — SessionStart hook that injects session info via `Effect.gen` and the `Hook.sessionId` / `Hook.cwd` accessors
 - [`examples/post-tool-log.ts`](./examples/post-tool-log.ts) — PostToolUse hook that branches on typed input and attaches an `addContext` note for oversized tool output
-- [`examples/plugin-define-complete.ts`](./examples/plugin-define-complete.ts) — Full `Plugin.define` + `Plugin.write` end-to-end, producing a complete plugin directory under an argv-supplied path
-- [`examples/project-runtime-summary.ts`](./examples/project-runtime-summary.ts) — `ClaudeRuntime.project({ cwd })` in a one-shot script that reads cached settings and named plugin components
+- [`examples/plugin-define-complete.ts`](./examples/plugin-define-complete.ts) — Full `Plugin.define` pipeline with validation, write, and post-write diagnostics under an argv-supplied path
+- [`examples/project-runtime-summary.ts`](./examples/project-runtime-summary.ts) — `ClaudeRuntime.project({ cwd })` with concurrent cached lookups, `Option.match`, and structured logs
 
 ## Development
 

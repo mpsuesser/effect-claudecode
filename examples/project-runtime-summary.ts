@@ -4,8 +4,9 @@
  * preset.
  *
  * Demonstrates `ClaudeRuntime.project({ cwd })`, which wires the cached
- * `ClaudeProject` service into the runtime so scripts can read settings,
- * `.mcp.json`, and plugin components without manual layer composition.
+ * `ClaudeProject` service into the runtime so scripts can compose cached
+ * settings, optional `.mcp.json`, and named plugin lookups with
+ * `Effect.all`, `Option.match`, and structured logs.
  *
  * Run from a repository that contains Claude Code config:
  *
@@ -22,17 +23,27 @@ const runtime = ClaudeRuntime.project({ cwd: process.cwd() });
 
 const program = Effect.gen(function* () {
 	const project = yield* ClaudeProject.project;
-	const settings = yield* project.settings;
-	const reviewSkill = yield* project.skill('review');
+	const [settings, reviewSkill, mcp] = yield* Effect.all([
+		project.settings,
+		project.skill('review'),
+		project.mcp
+	]);
 
-	yield* Effect.logInfo('Project summary').pipe(
+	yield* Effect.logInfo('project summary').pipe(
 		Effect.annotateLogs({
 			cwd: project.cwd,
 			model: settings.model ?? 'unset',
-			hasReviewSkill: Option.isSome(reviewSkill)
+			reviewSkill: Option.match(reviewSkill, {
+				onNone: () => 'missing',
+				onSome: (skill) => skill.path ?? 'present'
+			}),
+			mcp: Option.match(mcp, {
+				onNone: () => 'missing',
+				onSome: () => 'configured'
+			})
 		})
 	);
-});
+}).pipe(Effect.withLogSpan('project.summary'));
 
 await runtime.runPromise(program);
 await runtime.dispose();
