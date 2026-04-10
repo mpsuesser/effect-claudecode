@@ -12,14 +12,6 @@ npm install effect-claudecode effect@4.0.0-beta.46 @effect/platform-node-shared@
 bun add effect-claudecode effect@4.0.0-beta.46 @effect/platform-node-shared@4.0.0-beta.46
 ```
 
-If you want to run TypeScript hook files under Node without precompiling them, add a TS runner such as `tsx`:
-
-```sh
-npm install -D tsx
-```
-
-`effect` and `@effect/platform-node-shared` are peer dependencies. `platform-node-shared` provides the `runMain` + stdio plumbing the hook runner delegates to; it is the shared base that both `@effect/platform-node` and `@effect/platform-bun` build on, so hooks run identically under Node and Bun.
-
 ## Before / After
 
 A vanilla Claude Code hook that rewrites `npm test` to `bun run test`:
