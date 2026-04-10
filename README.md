@@ -2,8 +2,6 @@
 
 Write [Claude Code](https://code.claude.com) plugins — hooks, skills, subagents, commands, MCP servers — with [Effect v4](https://effect.website).
 
-`effect-claudecode` wraps Claude Code's plugin primitives (stdio hook processes, `.claude/settings.json`, `plugin.json` manifests, frontmatter files, `.mcp.json`) in Effect idioms, so plugin authors get typed input/output schemas for all 26 hook events, Effect-native handlers with injected context, decision constructors per event, correct stdio/exit-code semantics for free, and higher-level runtime helpers for shared project state — no more hand-parsing snake_case JSON or gluing `process.exit` calls together.
-
 ## Install
 
 ```sh
@@ -22,234 +20,317 @@ npm install -D tsx
 
 `effect` and `@effect/platform-node-shared` are peer dependencies. `platform-node-shared` provides the `runMain` + stdio plumbing the hook runner delegates to; it is the shared base that both `@effect/platform-node` and `@effect/platform-bun` build on, so hooks run identically under Node and Bun.
 
-## Quick Start
+## Before / After
 
-### Inject context into generated-file reads
+A vanilla Claude Code hook that rewrites `npm test` to `bun run test`:
+
+```js
+// hooks/rewrite-test.js — vanilla Node.js
+let data = '';
+process.stdin.on('data', (chunk) => (data += chunk));
+process.stdin.on('end', () => {
+  const input = JSON.parse(data);
+  const command = input.tool_input?.command ?? '';
+  const output = command.startsWith('npm test')
+    ? { continue: true, hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        updatedInput: { command: command.replace('npm test', 'bun run test') },
+        permissionDecision: 'allow',
+        reason: 'This workspace runs tests through Bun.'
+      }}
+    : { continue: true };
+  process.stdout.write(JSON.stringify(output));
+  process.exit(0);
+});
+```
+
+The same hook with effect-claudecode:
 
 ```ts
-import * as NodePath from '@effect/platform-node-shared/NodePath';
-import * as Bool from 'effect/Boolean';
 import * as Effect from 'effect/Effect';
-import * as Option from 'effect/Option';
-import * as Path from 'effect/Path';
 import * as Str from 'effect/String';
 import { Hook } from 'effect-claudecode';
 
-const toSourceFile = (relativePath: string): Option.Option<string> => {
-	if (Str.startsWith('dist/')(relativePath) && Str.endsWith('.d.ts')(relativePath)) {
-		return Option.some(
-			Str.replace('.d.ts', '.ts')(Str.replace('dist/', 'src/')(relativePath))
-		);
-	}
-
-	if (Str.startsWith('dist/')(relativePath) && Str.endsWith('.js')(relativePath)) {
-		return Option.some(
-			Str.replace('.js', '.ts')(Str.replace('dist/', 'src/')(relativePath))
-		);
-	}
-
-	if (Str.startsWith('build/')(relativePath) && Str.endsWith('.js')(relativePath)) {
-		return Option.some(
-			Str.replace('.js', '.ts')(Str.replace('build/', 'src/')(relativePath))
-		);
-	}
-
-	return Option.none();
-};
-
-const hook = Hook.PostToolUse.onTool({
-	toolName: 'Read',
-	handler: ({ tool }) =>
-		Effect.gen(function* () {
-			const cwd = yield* Hook.cwd;
-			const path = yield* Path.Path;
-			const relativePath = path.normalize(
-				Bool.match(path.isAbsolute(tool.file_path), {
-					onFalse: () => tool.file_path,
-					onTrue: () => path.relative(cwd, tool.file_path)
-				})
-			);
-
-			return yield* Option.match(toSourceFile(relativePath), {
-				onNone: () => Effect.succeed(Hook.PostToolUse.passthrough()),
-				onSome: (sourcePath) =>
-					Effect.logInfo('redirected generated read to source').pipe(
-						Effect.annotateLogs({
-							artifact: relativePath,
-							source: sourcePath
-						}),
-						Effect.as(
-							Hook.PostToolUse.addContext(
-								`This file is generated output. Prefer \`${sourcePath}\` as the source of truth.`
-							)
-						)
-					)
-			});
-		}).pipe(Effect.provide(NodePath.layer))
+const hook = Hook.PreToolUse.onTool({
+  toolName: 'Bash',
+  handler: ({ tool }) =>
+    Effect.succeed(
+      Str.startsWith('npm test')(tool.command)
+        ? Hook.PreToolUse.allowWithUpdatedInput(
+            { command: Str.replace('npm test', 'bun run test')(tool.command) },
+            'This workspace runs tests through Bun.'
+          )
+        : Hook.PreToolUse.allow()
+    )
 });
 
 Hook.runMain(hook);
 ```
 
-Save as `hooks/post-read-source-hint.ts`, then wire it into `.claude/settings.json`:
+Typed tool payloads, decision constructors, correct exit-code semantics — no stdin plumbing, no manual JSON, no `process.exit`.
+
+## What You Can Build
+
+### Detect when Claude is stuck in a loop
+
+Every Claude Code user has watched Claude read the same file three times in a row or re-run a failing command with the same arguments. This hook detects that and nudges Claude out of the loop.
+
+Because hooks are ephemeral processes (each invocation is a fresh spawn), the action log is persisted to a JSON file keyed by session ID — a pattern that shows off Effect's `FileSystem` service and `Schema` for typed serialization:
+
+```ts
+import * as NodeFileSystem from '@effect/platform-node-shared/NodeFileSystem';
+import * as Arr from 'effect/Array';
+import * as Effect from 'effect/Effect';
+import * as FileSystem from 'effect/FileSystem';
+import * as Schema from 'effect/Schema';
+import { Hook } from 'effect-claudecode';
+
+const REPEAT_THRESHOLD = 3;
+
+const ActionEntry = Schema.Struct({ tool: Schema.String, key: Schema.String });
+const ActionLog = Schema.Struct({ entries: Schema.Array(ActionEntry) });
+type ActionLog = typeof ActionLog.Type;
+
+const actionKey = (input: Hook.PostToolUse.Input): string => {
+  const toolInput = input.tool_input;
+  if (input.tool_name === 'Bash') return String(toolInput['command'] ?? 'unknown');
+  if (input.tool_name === 'Read' || input.tool_name === 'Edit' || input.tool_name === 'Write')
+    return String(toolInput['file_path'] ?? 'unknown');
+  return input.tool_name;
+};
+
+const hook = Hook.PostToolUse.define({
+  handler: (input) =>
+    Effect.gen(function* () {
+      const sessionId = yield* Hook.sessionId;
+      const fs = yield* FileSystem.FileSystem;
+      const statePath = `/tmp/claude-loop-${sessionId}.json`;
+
+      const existing = yield* fs.readFileString(statePath).pipe(
+        Effect.flatMap((raw) =>
+          Schema.decodeUnknownEffect(Schema.fromJsonString(ActionLog))(raw)
+        ),
+        Effect.orElseSucceed((): ActionLog => ({ entries: [] }))
+      );
+
+      const key = actionKey(input);
+      const updated: ActionLog = {
+        entries: [...existing.entries, { tool: input.tool_name, key }]
+      };
+
+      yield* Schema.encodeEffect(Schema.fromJsonString(ActionLog))(updated).pipe(
+        Effect.flatMap((json) => fs.writeFileString(statePath, json))
+      );
+
+      const repeats = Arr.filter(
+        updated.entries,
+        (e) => e.tool === input.tool_name && e.key === key
+      ).length;
+
+      if (repeats >= REPEAT_THRESHOLD) {
+        return Hook.PostToolUse.addContext(
+          `You have run \`${input.tool_name}\` on \`${key}\` ${repeats} times this session.` +
+          ' The result has not changed. Step back and consider a different approach' +
+          ' — the fix likely is not in this file, or the command needs different arguments.'
+        );
+      }
+
+      return Hook.PostToolUse.passthrough();
+    }).pipe(Effect.provide(NodeFileSystem.layer))
+});
+
+Hook.runMain(hook);
+```
+
+Wire it into `.claude/settings.json`:
 
 ```json
 {
-	"hooks": {
-		"PostToolUse": [
-			{
-				"matcher": "Read",
-				"hooks": [
-					{ "type": "command", "command": "bun hooks/post-read-source-hint.ts" }
-				]
-			}
-		]
-	}
+  "hooks": {
+    "PostToolUse": [
+      { "hooks": [{ "type": "command", "command": "bun hooks/loop-detector.ts" }] }
+    ]
+  }
 }
 ```
 
-If you are on Node, use `tsx hooks/post-read-source-hint.ts` instead, or compile the file to JavaScript and point Claude Code at `node hooks/post-read-source-hint.js`.
+### Build a complete plugin in one script
 
-### A complete plugin via `Plugin.define` + `Plugin.write`
+`Plugin.define` assembles a full plugin — commands, agents, skills, output styles, hooks, and MCP config — as a single declarative value. Pipe it through `validate` → `write` → `doctor` and you have an installable plugin directory:
 
 ```ts
 import * as Effect from 'effect/Effect';
-
 import { ClaudeRuntime, Plugin } from 'effect-claudecode';
 
 const plugin = Plugin.define({
-	manifest: {
-		name: 'effect-review-kit',
-		version: '0.1.0',
-		description: 'Project-aware review defaults for Claude Code',
-		author: new Plugin.AuthorInfo({ name: 'Alice' })
-	},
-	commands: [
-		Plugin.command({
-			name: 'review',
-			description: 'Review staged changes with project conventions',
-			body:
-				'# Review\n\nReview the staged changes. Lead with concrete findings, then call out regressions and missing tests.\n'
-		})
-	],
-	skills: [
-		Plugin.skill({
-			name: 'effect-first',
-			description: 'Keep implementations aligned with Effect v4 conventions',
-			body:
-				'# Effect-First\n\nPrefer typed errors, `Option` for absence, and `Schema` decoding at boundaries.\n'
-		})
-	],
-	outputStyles: [
-		Plugin.outputStyle({
-			name: 'concise-review',
-			description: 'Lead with findings and keep the summary tight',
-			body:
-				'# Concise Review\n\nStart with issues worth fixing. Keep supporting detail brief and specific.\n'
-		})
-	]
+  manifest: {
+    name: 'review-toolkit',
+    version: '1.0.0',
+    description: 'Opinionated code review defaults — commands, agents, and loop detection.',
+    author: new Plugin.AuthorInfo({ name: 'Your Team' })
+  },
+  commands: [
+    Plugin.command({
+      name: 'review',
+      description: 'Review staged changes against project conventions',
+      body: '# /review\n\nReview the staged changes. Lead with concrete findings.\n'
+    }),
+    Plugin.command({
+      name: 'summarize',
+      description: 'Summarize recent work for a PR description',
+      body: '# /summarize\n\nRead the git log and diff. Produce a PR title, summary, and test plan.\n'
+    })
+  ],
+  agents: [
+    Plugin.agent({
+      name: 'reviewer',
+      description: 'Autonomous code review agent',
+      body: '# Reviewer\n\nFocus on correctness: logic errors, race conditions, missing tests.\n'
+    })
+  ],
+  skills: [
+    Plugin.skill({
+      name: 'effect-patterns',
+      description: 'Guide Claude toward idiomatic Effect v4 patterns',
+      body: '# Effect Patterns\n\nUse TaggedErrorClass for errors, Option for absence, Schema at boundaries.\n'
+    })
+  ],
+  hooksConfig: {
+    PostToolUse: [{
+      hooks: [{ type: 'command', command: 'bun ${CLAUDE_PLUGIN_ROOT}/hooks/loop-detector.ts' }]
+    }]
+  },
+  mcpConfig: {
+    mcpServers: {
+      'session-logs': { type: 'stdio', command: 'mcp-filesystem', args: ['--root', '/tmp'] }
+    }
+  }
 });
 
-const outputDir = process.argv[2] ?? 'artifacts/effect-review-kit';
-
 const runtime = ClaudeRuntime.default();
-
 await runtime.runPromise(
-	Plugin.validate(plugin).pipe(
-		Effect.flatMap(() => Plugin.write(plugin, outputDir)),
-		Effect.flatMap(() => Plugin.doctor(outputDir)),
-		Effect.tap((report) =>
-			Effect.logInfo('plugin materialized').pipe(
-				Effect.annotateLogs({
-					outputDir,
-					errors: report.errors.length,
-					warnings: report.warnings.length
-				})
-			)
-		),
-		Effect.withLogSpan('plugin.build')
-	)
+  Plugin.validate(plugin).pipe(
+    Effect.flatMap(() => Plugin.write(plugin, 'artifacts/review-toolkit')),
+    Effect.flatMap(() => Plugin.doctor('artifacts/review-toolkit')),
+    Effect.tap((report) =>
+      Effect.logInfo('plugin materialized').pipe(
+        Effect.annotateLogs({ errors: report.errors.length, warnings: report.warnings.length })
+      )
+    )
+  )
 );
-
 await runtime.dispose();
 ```
 
-### Shared runtime for non-hook programs
+```
+artifacts/review-toolkit/
+├── .claude-plugin/plugin.json
+├── commands/review.md
+├── commands/summarize.md
+├── agents/reviewer.md
+├── skills/effect-patterns/SKILL.md
+├── hooks/hooks.json
+└── .mcp.json
+```
 
-`ClaudeRuntime.default()` is the minimal preset for scripts that just need the platform services (`FileSystem`, `Path`) and Effect logging. For project-aware tooling, prefer `ClaudeRuntime.project({ cwd })`, which also wires in the cached `ClaudeProject` service:
+### Stream session activity to external tools
+
+A single binary handles multiple event types via `Hook.dispatch`, writing structured JSONL entries to a session log. Point any MCP filesystem server at the log directory and other agents can query what Claude has been doing in real-time:
 
 ```ts
+import * as NodeFileSystem from '@effect/platform-node-shared/NodeFileSystem';
 import * as Effect from 'effect/Effect';
-import * as Option from 'effect/Option';
+import * as FileSystem from 'effect/FileSystem';
+import { Hook } from 'effect-claudecode';
 
-import { ClaudeProject, ClaudeRuntime } from 'effect-claudecode';
+const appendEvent = (
+  sessionId: string, event: string, summary: string
+): Effect.Effect<void, never, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const entry = JSON.stringify({ ts: Date.now(), event, summary, session_id: sessionId });
+    yield* fs.writeFileString(`/tmp/claude-events-${sessionId}.jsonl`, entry + '\n', { flag: 'a' });
+  }).pipe(Effect.orElseSucceed(() => void 0));
 
-const workspaceDir = process.cwd();
-const runtime = ClaudeRuntime.project({ cwd: workspaceDir });
-
-const summary = await runtime.runPromise(
-	Effect.gen(function* () {
-		const project = yield* ClaudeProject.project;
-		const [settings, reviewSkill, mcp] = yield* Effect.all([
-			project.settings,
-			project.skill('review'),
-			project.mcp
-		]);
-
-		const summary = {
-			workspaceDir,
-			model: settings.model ?? 'unset',
-			reviewSkill: Option.match(reviewSkill, {
-				onNone: () => 'missing',
-				onSome: (skill) => skill.path ?? 'present'
-			}),
-			mcp: Option.match(mcp, {
-				onNone: () => 'missing',
-				onSome: () => 'configured'
-			})
-		};
-
-		yield* Effect.logInfo('project summary').pipe(
-			Effect.annotateLogs(summary)
-		);
-
-		return summary;
-	}).pipe(
-		Effect.withLogSpan('project.summary')
-	)
-);
-
-await runtime.dispose();
+Hook.dispatch({
+  SessionStart: Hook.SessionStart.define({
+    handler: (input) =>
+      appendEvent(input.session_id, 'SessionStart', `source=${input.source}`).pipe(
+        Effect.as(Hook.SessionStart.passthrough()), Effect.provide(NodeFileSystem.layer))
+  }),
+  PostToolUse: Hook.PostToolUse.define({
+    handler: (input) =>
+      appendEvent(input.session_id, 'PostToolUse', `tool=${input.tool_name}`).pipe(
+        Effect.as(Hook.PostToolUse.passthrough()), Effect.provide(NodeFileSystem.layer))
+  }),
+  Stop: Hook.Stop.define({
+    handler: (input) =>
+      appendEvent(input.session_id, 'Stop', 'turn ended').pipe(
+        Effect.as(Hook.Stop.allowStop()), Effect.provide(NodeFileSystem.layer))
+  }),
+  SessionEnd: Hook.SessionEnd.define({
+    handler: (input) =>
+      appendEvent(input.session_id, 'SessionEnd', `reason=${input.exit_reason}`).pipe(
+        Effect.as(Hook.SessionEnd.passthrough()), Effect.provide(NodeFileSystem.layer))
+  })
+});
 ```
 
-Use `ClaudeRuntime.plugin({ cwd, pluginRoot })` when the script should treat a plugin directory as the source of truth for plugin scans and named component lookups. `ClaudeRuntime.default()` remains the right choice for platform-only scripts like one-shot plugin builders.
+Wire all four events to the same binary, then add an MCP server that exposes the logs:
+
+```json
+{
+  "mcpServers": {
+    "session-logs": { "type": "stdio", "command": "mcp-filesystem", "args": ["--root", "/tmp"] }
+  }
+}
+```
 
 ## Runtime Choices
 
-- Bun: write TypeScript hook files and point Claude Code at `bun ./hooks/my-hook.ts`.
-- Node + TypeScript: keep the same `.ts` hook files, but point Claude Code at `tsx ./hooks/my-hook.ts`.
-- Node + JavaScript: compile your hook scripts ahead of time and point Claude Code at `node ./hooks/my-hook.js`.
+- **Bun**: write TypeScript hook files and point Claude Code at `bun ./hooks/my-hook.ts`.
+- **Node + TypeScript**: keep the same `.ts` hook files, but point Claude Code at `tsx ./hooks/my-hook.ts`.
+- **Node + JavaScript**: compile your hook scripts ahead of time and point Claude Code at `node ./hooks/my-hook.js`.
 
 The library itself does not require Bun. Bun is simply the nicest zero-friction path when you want to keep hook scripts as TypeScript files.
 
+For non-hook programs, `ClaudeRuntime.default()` is the minimal preset providing platform services (`FileSystem`, `Path`) and Effect logging. For project-aware tooling, prefer `ClaudeRuntime.project({ cwd })`, which wires in the cached `ClaudeProject` service for settings, plugin lookups, and `.mcp.json` access. Use `ClaudeRuntime.plugin({ cwd, pluginRoot })` when the script should treat a plugin directory as the source of truth.
+
 ## Features
 
+### Hook runner & events
+
 - **`Hook.runMain(hook)`** — drop-in runner that reads stdin, decodes the schema, builds a `HookContext`, runs your handler, encodes the output, and exits with the right code
-- **26 event schemas** covering the full Claude Code hook surface — permission gates, prompt gates, lifecycle events, subagent events, elicitations, worktree events, and more
-- **Decision constructors per event** — `Hook.PreToolUse.deny('reason')`, `Hook.UserPromptSubmit.block('off-topic')`, `Hook.SessionStart.addContext('extra')`
+- **26 event schemas** — permission gates, prompt gates, lifecycle events, subagent events, elicitations, worktree events, and more
+- **Decision constructors** — `Hook.PreToolUse.deny('reason')`, `Hook.UserPromptSubmit.block('off-topic')`, `Hook.SessionStart.addContext('extra')`
 - **`HookContext` service** — `yield* Hook.sessionId`, `yield* Hook.cwd`, `yield* Hook.transcriptPath` inside any handler
 - **`Hook.dispatch({...})`** — handle multiple event types from a single binary
-- **`Hook.Tool` + `Hook.PreToolUse.onTool(...)` / `Hook.PostToolUse.onTool(...)`** — typed adapters for common tool payloads like `Bash` and `Read`
+- **Typed tool adapters** — `Hook.PreToolUse.onTool(...)` / `Hook.PostToolUse.onTool(...)` for `Bash` and `Read` payloads
 - **`HookBus`** — publish decoded hook events to a typed in-process `Stream`
-- **`ClaudeRuntime.default()`** — prewired `ManagedRuntime` for `FileSystem`, `Path`, and Effect logging in any effect-claudecode program
-- **`ClaudeRuntime.project({ cwd })` / `ClaudeRuntime.plugin({ cwd, pluginRoot })`** — reusable project-aware runtime presets that include cached `ClaudeProject` state
-- **`ClaudeProject.layer({ cwd })`** — cached project-scoped access to settings, `.mcp.json`, plugin directories, and named component lookups with explicit invalidation
-- **`Settings.load(cwd)`** — Effect loader that reads and merges user/project/local `settings.json` files into one typed `SettingsFile`
+
+### Plugin builder
+
 - **`Plugin.define({...})` + `Plugin.write(def, dir)`** — declarative plugin builder + materializer that produces a complete plugin directory tree
 - **`Plugin.scan(dir)` / `Plugin.load(dir)` / `Plugin.sync(def)`** — inspect, round-trip, and normalize existing plugin directories
+- **`Plugin.validate` + `Plugin.doctor`** — pre-write validation and post-write diagnostics
+
+### Project & runtime
+
+- **`ClaudeRuntime.default()` / `.project({ cwd })` / `.plugin({ cwd, pluginRoot })`** — prewired `ManagedRuntime` presets with `FileSystem`, `Path`, and optional cached `ClaudeProject` state
+- **`ClaudeProject.layer({ cwd })`** — cached project-scoped access to settings, `.mcp.json`, plugin directories, and named component lookups
+- **`Settings.load(cwd)`** — reads and merges user/project/local `settings.json` files into one typed `SettingsFile`
+
+### Parsing & config
+
 - **`Frontmatter.parseSkillFile(path)` and friends** — one-step typed markdown loaders for skills, commands, subagents, and output styles
 - **`Mcp.loadJson(path)`** — read `.mcp.json` into a discriminated `stdio` / `http` / `sse` union with typed authorization variants
-- **Testing module** — fixtures for every event, end-to-end `runHookWithMockStdin`, `expect*Decision` helpers, mock filesystem/stdio/context layers
+
+### Testing
+
+- **Fixtures** for every event with sensible defaults, override field-by-field
+- **`runHookWithMockStdin`** — end-to-end hook runner with captured stdout, stderr, exit code
+- **`expectAllowDecision` / `expectDenyDecision` / `expectBlockDecision` / `expectAddContext`** — assertion helpers
+- **Mock layers** — `makeMockFileSystem`, `makeMockStdioLayer`, `makeMockHookContext`
 
 ## Hooks
 
@@ -977,6 +1058,9 @@ const context = Testing.makeMockHookContext({
 
 Complete runnable examples live in [`examples/`](./examples):
 
+- [`examples/loop-detector.ts`](./examples/loop-detector.ts) — Stateful PostToolUse hook that detects when Claude is stuck in a loop and injects context to break the cycle
+- [`examples/plugin-factory.ts`](./examples/plugin-factory.ts) — Build a complete plugin (commands, agents, skills, hooks, MCP) from a single `Plugin.define` call
+- [`examples/session-event-log.ts`](./examples/session-event-log.ts) — `Hook.dispatch` multi-event handler that writes structured JSONL session logs for MCP consumption
 - [`examples/pre-bash-denylist.ts`](./examples/pre-bash-denylist.ts) — PreToolUse hook that blocks destructive Bash commands with `Option.match`, hook context accessors, and structured logs
 - [`examples/session-start-inject-env.ts`](./examples/session-start-inject-env.ts) — SessionStart hook that injects session info via `Effect.gen` and the `Hook.sessionId` / `Hook.cwd` accessors
 - [`examples/post-read-source-hint.ts`](./examples/post-read-source-hint.ts) — PostToolUse hook that redirects generated-file reads back to the source of truth
