@@ -14,6 +14,7 @@ import * as Schema from 'effect/Schema';
 
 import type { HookContext } from '../Context.ts';
 import { envelopeFields } from '../Envelope.ts';
+import * as Matcher from '../Matcher.ts';
 import type { HookDefinition } from '../Runner.ts';
 
 // ---------------------------------------------------------------------------
@@ -98,3 +99,29 @@ export const define = (config: {
 	outputSchema: Output,
 	handler: config.handler
 });
+
+/**
+ * Build a Notification hook that only handles matching `notification_type`
+ * values.
+ *
+ * @category Constructors
+ * @since 0.1.0
+ */
+export const onMatcher = (config: {
+	readonly matcher: string | RegExp;
+	readonly handler: (
+		input: Input
+	) => Effect.Effect<Output, unknown, HookContext.Service>;
+	readonly onMismatch?: (
+		input: Input
+	) => Effect.Effect<Output, unknown, HookContext.Service>;
+}): HookDefinition<Input, Output> =>
+	define({
+		handler: Matcher.handleMatcher({
+			matcher: config.matcher,
+			select: (input) => input.notification_type,
+			onMatch: config.handler,
+			onMismatch:
+				config.onMismatch ?? (() => Effect.succeed(passthrough()))
+		})
+	});

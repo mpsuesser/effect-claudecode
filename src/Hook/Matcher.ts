@@ -11,6 +11,8 @@
  * @since 0.1.0
  */
 
+import type * as Effect from 'effect/Effect';
+
 // ---------------------------------------------------------------------------
 // Matchers
 // ---------------------------------------------------------------------------
@@ -35,11 +37,44 @@
  * isMcp('mcp__foo')    // true
  * ```
  */
-export const matchTool = (pattern: string | RegExp): ((name: string) => boolean) => {
+export const matchValue = (pattern: string | RegExp): ((name: string) => boolean) => {
 	const regex =
 		pattern instanceof RegExp ? pattern : new RegExp(`^(?:${pattern})$`);
 	return (name: string) => regex.test(name);
 };
+
+/**
+ * Test whether a matcher pattern matches a value, one-shot.
+ *
+ * @category Matcher
+ * @since 0.1.0
+ */
+export const testValue = (pattern: string | RegExp, name: string): boolean =>
+	matchValue(pattern)(name);
+
+/**
+ * Build a handler that runs only when the selected matcher value matches.
+ *
+ * @internal
+ */
+export const handleMatcher = <I, O, E, R>(config: {
+	readonly matcher: string | RegExp;
+	readonly select: (input: I) => string;
+	readonly onMatch: (input: I) => Effect.Effect<O, E, R>;
+	readonly onMismatch: (input: I) => Effect.Effect<O, E, R>;
+}): ((input: I) => Effect.Effect<O, E, R>) =>
+	(input) =>
+		testValue(config.matcher, config.select(input))
+			? config.onMatch(input)
+			: config.onMismatch(input);
+
+/**
+ * Alias for `matchValue(...)` when matching `tool_name`.
+ *
+ * @category Matcher
+ * @since 0.1.0
+ */
+export const matchTool = matchValue;
 
 /**
  * Test whether a regex pattern matches a tool name, one-shot.
@@ -47,5 +82,4 @@ export const matchTool = (pattern: string | RegExp): ((name: string) => boolean)
  * @category Matcher
  * @since 0.1.0
  */
-export const testTool = (pattern: string | RegExp, name: string): boolean =>
-	matchTool(pattern)(name);
+export const testTool = testValue;

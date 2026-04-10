@@ -14,6 +14,7 @@ import * as Schema from 'effect/Schema';
 
 import type { HookContext } from '../Context.ts';
 import { envelopeFields } from '../Envelope.ts';
+import * as Matcher from '../Matcher.ts';
 import type { HookDefinition } from '../Runner.ts';
 
 export const Action = Schema.Literals(['accept', 'decline', 'cancel'] as const);
@@ -71,6 +72,15 @@ export const cancel = (): Output =>
 		})
 	});
 
+/**
+ * No-op output — Claude Code continues the normal elicitation-result flow.
+ *
+ * @category Decisions
+ * @since 0.1.0
+ */
+export const passthrough = (): Output =>
+	new Output({ continue: undefined });
+
 export const define = (config: {
 	readonly handler: (
 		input: Input
@@ -81,3 +91,29 @@ export const define = (config: {
 	outputSchema: Output,
 	handler: config.handler
 });
+
+/**
+ * Build an ElicitationResult hook that only handles matching
+ * `mcp_server_name` values.
+ *
+ * @category Constructors
+ * @since 0.1.0
+ */
+export const onMatcher = (config: {
+	readonly matcher: string | RegExp;
+	readonly handler: (
+		input: Input
+	) => Effect.Effect<Output, unknown, HookContext.Service>;
+	readonly onMismatch?: (
+		input: Input
+	) => Effect.Effect<Output, unknown, HookContext.Service>;
+}): HookDefinition<Input, Output> =>
+	define({
+		handler: Matcher.handleMatcher({
+			matcher: config.matcher,
+			select: (input) => input.mcp_server_name,
+			onMatch: config.handler,
+			onMismatch:
+				config.onMismatch ?? (() => Effect.succeed(passthrough()))
+		})
+	});
