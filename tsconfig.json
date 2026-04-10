@@ -1,6 +1,7 @@
 {
   "$schema": "https://www.schemastore.org/tsconfig.json",
   "compilerOptions": {
+    "baseUrl": ".",
     "allowImportingTsExtensions": true,
     "exactOptionalPropertyTypes": true,
     "incremental": true,
@@ -38,6 +39,9 @@
         ]
       }
     ],
+    "paths": {
+      "effect-claudecode": ["./src/index.ts"]
+    },
     "skipLibCheck": true,
     "sourceMap": true,
     "strict": true,

@@ -19,7 +19,6 @@ import * as Schema from 'effect/Schema';
 import * as Sink from 'effect/Sink';
 import * as Stdio from 'effect/Stdio';
 import * as Stream from 'effect/Stream';
-import { expect } from 'vitest';
 
 import {
 	HookHandlerError,
@@ -433,6 +432,86 @@ export const fixtures = {
 // Decision assertion helpers
 // ---------------------------------------------------------------------------
 
+const AnyString = Symbol.for('effect-claudecode/Testing/AnyString');
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === 'object' && value !== null;
+
+const formatAssertionValue = (value: unknown): string => {
+	return typeof value === 'string'
+		? value
+		: JSON.stringify(value, null, 2) ?? String(value);
+};
+
+const failAssertion = (message: string): never => {
+	throw new Error(message);
+};
+
+const matchesExpected = (actual: unknown, expected: unknown): boolean => {
+	if (expected === AnyString) {
+		return typeof actual === 'string';
+	}
+
+	if (expected instanceof RegExp) {
+		return typeof actual === 'string' && expected.test(actual);
+	}
+
+	if (Array.isArray(expected)) {
+		return (
+			Array.isArray(actual) &&
+			actual.length === expected.length &&
+			expected.every((item, index) => matchesExpected(actual[index], item))
+		);
+	}
+
+	if (isRecord(expected)) {
+		return (
+			isRecord(actual) &&
+			Object.entries(expected).every(([key, value]) =>
+				matchesExpected(actual[key], value)
+			)
+		);
+	}
+
+	return Object.is(actual, expected);
+};
+
+const assertMatchObject = (
+	actual: unknown,
+	expected: Record<string, unknown>,
+	label: string
+): void => {
+	if (!matchesExpected(actual, expected)) {
+		failAssertion(
+			`${label}\nExpected: ${formatAssertionValue(expected)}\nActual: ${formatAssertionValue(actual)}`
+		);
+	}
+};
+
+const assertEqual = (actual: unknown, expected: unknown, label: string): void => {
+	if (!matchesExpected(actual, expected)) {
+		failAssertion(
+			`${label}\nExpected: ${formatAssertionValue(expected)}\nActual: ${formatAssertionValue(actual)}`
+		);
+	}
+};
+
+const assertMatch = (actual: unknown, expected: unknown, label: string): void => {
+	if (!matchesExpected(actual, expected)) {
+		failAssertion(
+			`${label}\nExpected: ${formatAssertionValue(expected)}\nActual: ${formatAssertionValue(actual)}`
+		);
+	}
+};
+
+const assertDefined = <A>(value: A | undefined, label: string): A => {
+	if (value !== undefined) {
+		return value;
+	}
+
+	return failAssertion(label);
+};
+
 /**
  * Assert that `output` is a PreToolUse `allow` decision. If `reason`
  * is provided, it must match `permissionDecisionReason`.
@@ -450,7 +529,11 @@ export const expectAllowDecision = (
 	if (reason !== undefined) {
 		expected['permissionDecisionReason'] = reason;
 	}
-	expect(output).toMatchObject({ hookSpecificOutput: expected });
+	assertMatchObject(
+		output,
+		{ hookSpecificOutput: expected },
+		'Expected an allow decision.'
+	);
 };
 
 /**
@@ -470,7 +553,11 @@ export const expectDenyDecision = (
 	if (reason !== undefined) {
 		expected['permissionDecisionReason'] = reason;
 	}
-	expect(output).toMatchObject({ hookSpecificOutput: expected });
+	assertMatchObject(
+		output,
+		{ hookSpecificOutput: expected },
+		'Expected a deny decision.'
+	);
 };
 
 /**
@@ -490,7 +577,11 @@ export const expectAskDecision = (
 	if (reason !== undefined) {
 		expected['permissionDecisionReason'] = reason;
 	}
-	expect(output).toMatchObject({ hookSpecificOutput: expected });
+	assertMatchObject(
+		output,
+		{ hookSpecificOutput: expected },
+		'Expected an ask decision.'
+	);
 };
 
 /**
@@ -511,7 +602,7 @@ export const expectBlockDecision = (
 	if (reason !== undefined) {
 		expected['reason'] = reason;
 	}
-	expect(output).toMatchObject(expected);
+	assertMatchObject(output, expected, 'Expected a block decision.');
 };
 
 /**
@@ -528,9 +619,13 @@ export const expectAddContext = (
 ): void => {
 	const expected: Record<string, unknown> =
 		context === undefined
-			? { additionalContext: expect.any(String) }
+			? { additionalContext: AnyString }
 			: { additionalContext: context };
-	expect(output).toMatchObject({ hookSpecificOutput: expected });
+	assertMatchObject(
+		output,
+		{ hookSpecificOutput: expected },
+		'Expected an addContext decision.'
+	);
 };
 
 // ---------------------------------------------------------------------------
@@ -935,16 +1030,26 @@ export const expectPluginTree = (
 	const actualPaths = Array.from(snapshot.files.keys()).sort();
 	const expectedPaths = Object.keys(expected).sort();
 
-	expect(actualPaths).toEqual(expectedPaths);
+	assertEqual(actualPaths, expectedPaths, 'Plugin tree paths did not match.');
 
 	for (const path of expectedPaths) {
-		const actual = snapshot.files.get(path);
-		expect(actual).toBeDefined();
+		const actual = assertDefined(
+			snapshot.files.get(path),
+			`Expected plugin tree to contain ${path}.`
+		);
 		const matcher = expected[path];
 		if (matcher instanceof RegExp) {
-			expect(actual).toMatch(matcher);
+			assertMatch(
+				actual,
+				matcher,
+				`Plugin tree file ${path} did not match the expected pattern.`
+			);
 		} else {
-			expect(actual).toBe(matcher);
+			assertEqual(
+				actual,
+				matcher,
+				`Plugin tree file ${path} did not match the expected contents.`
+			);
 		}
 	}
 };

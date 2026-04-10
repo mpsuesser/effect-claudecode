@@ -17,9 +17,11 @@ bun install
 ## Development Workflow
 
 ```sh
-bun run check       # run tests + typecheck
+bun run check       # run tests + typecheck + build + npm pack --dry-run
+bun run build       # emit dist/ for npm publishing
 bun run test        # run all tests
 bun run typecheck   # tsc --noEmit
+bun run pack:dry-run
 ```
 
 Run a single test file or by name:

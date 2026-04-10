@@ -26,17 +26,25 @@
   },
   "type": "module",
   "files": [
-    "src",
+    "dist",
     "README.md",
     "LICENSE"
   ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     }
   },
   "scripts": {
-    "check": "bun run test && bun run typecheck",
+    "build": "rm -rf dist && bun run build:ts && bun run build:types:rewrite",
+    "build:ts": "tsc -p tsconfig.build.json",
+    "build:types:rewrite": "bun ./scripts/rewrite-dts-relative-imports.mjs",
+    "check": "bun run test && bun run typecheck && bun run build && bun run pack:dry-run",
+    "pack:dry-run": "npm pack --dry-run",
+    "prepack": "bun run build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "bun run check"

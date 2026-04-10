@@ -6,24 +6,23 @@ Write [Claude Code](https://code.claude.com) plugins — hooks, skills, subagent
 
 The examples below keep `Effect.run*` at the runtime boundary and keep the actual hook logic inside `Effect.gen` blocks with `yield*`, injected services, and Effect-native logging.
 
-## Features
+`effect-claudecode` publishes compiled ESM and `.d.ts` files to npm. Bun is still the shortest path, but Bun is not required.
 
-- **`Hook.runMain(hook)`** — drop-in runner that reads stdin, decodes the schema, builds a `HookContext`, runs your handler, encodes the output, and exits with the right code
-- **26 event schemas** covering the full Claude Code hook surface — permission gates, prompt gates, lifecycle events, subagent events, elicitations, worktree events, and more
-- **Decision constructors per event** — `Hook.PreToolUse.deny('reason')`, `Hook.UserPromptSubmit.block('off-topic')`, `Hook.SessionStart.addContext('extra')`
-- **`HookContext` service** — `yield* Hook.sessionId`, `yield* Hook.cwd`, `yield* Hook.transcriptPath` inside any handler
-- **`Hook.dispatch({...})`** — handle multiple event types from a single binary
-- **`Hook.Tool` + `Hook.PreToolUse.onTool(...)` / `Hook.PostToolUse.onTool(...)`** — typed adapters for common tool payloads like `Bash` and `Read`
-- **`HookBus`** — publish decoded hook events to a typed in-process `Stream`
-- **`ClaudeRuntime.default()`** — prewired `ManagedRuntime` for `FileSystem`, `Path`, and Effect logging in any effect-claudecode program
-- **`ClaudeRuntime.project({ cwd })` / `ClaudeRuntime.plugin({ cwd, pluginRoot })`** — reusable project-aware runtime presets that include cached `ClaudeProject` state
-- **`ClaudeProject.layer({ cwd })`** — cached project-scoped access to settings, `.mcp.json`, plugin directories, and named component lookups with explicit invalidation
-- **`Settings.load(cwd)`** — Effect loader that reads and merges user/project/local `settings.json` files into one typed `SettingsFile`
-- **`Plugin.define({...})` + `Plugin.write(def, dir)`** — declarative plugin builder + materializer that produces a complete plugin directory tree
-- **`Plugin.scan(dir)` / `Plugin.load(dir)` / `Plugin.sync(def)`** — inspect, round-trip, and normalize existing plugin directories
-- **`Frontmatter.parseSkillFile(path)` and friends** — one-step typed markdown loaders for skills, commands, subagents, and output styles
-- **`Mcp.loadJson(path)`** — read `.mcp.json` into a discriminated `stdio` / `http` / `sse` union with typed authorization variants
-- **Testing module** — fixtures for every event, end-to-end `runHookWithMockStdin`, `expect*Decision` helpers, mock filesystem/stdio/context layers
+## Who It's For
+
+- You already write Effect v4 code and want Claude Code's plugin surface to feel like the rest of your Effect stack.
+- You want typed hook input/output schemas, service-backed context access, tagged errors, and reusable runtime presets instead of one-off stdio scripts.
+- You prefer Bun, or at least do not mind using Effect's Node platform services directly when you are not on Bun.
+
+## Start Here
+
+- [Install](#install)
+- [Runtime choices](#runtime-choices)
+- [A single PreToolUse hook](#a-single-pretooluse-hook)
+- [A complete plugin via `Plugin.define` + `Plugin.write`](#a-complete-plugin-via-plugindefine--pluginwrite)
+- [Shared runtime for non-hook programs](#shared-runtime-for-non-hook-programs)
+- [Testing](#testing)
+- [Full API reference](#hooks)
 
 ## Install
 
@@ -35,7 +34,21 @@ npm install effect-claudecode effect@4.0.0-beta.43 @effect/platform-node-shared@
 bun add effect-claudecode effect@4.0.0-beta.43 @effect/platform-node-shared@4.0.0-beta.43
 ```
 
+If you want to run TypeScript hook files under Node without precompiling them, add a TS runner such as `tsx`:
+
+```sh
+npm install -D tsx
+```
+
 `effect` and `@effect/platform-node-shared` are peer dependencies. `platform-node-shared` provides the `runMain` + stdio plumbing the hook runner delegates to; it is the shared base that both `@effect/platform-node` and `@effect/platform-bun` build on, so hooks run identically under Node and Bun.
+
+## Runtime Choices
+
+- Bun: write TypeScript hook files and point Claude Code at `bun ./hooks/my-hook.ts`.
+- Node + TypeScript: keep the same `.ts` hook files, but point Claude Code at `tsx ./hooks/my-hook.ts`.
+- Node + JavaScript: compile your hook scripts ahead of time and point Claude Code at `node ./hooks/my-hook.js`.
+
+The library itself does not require Bun. Bun is simply the nicest zero-friction path when you want to keep hook scripts as TypeScript files.
 
 ## Quick Start
 
@@ -74,6 +87,8 @@ Save as `hooks/pre-bash-denylist.ts`, then wire it into `.claude/settings.json`:
 	}
 }
 ```
+
+If you are on Node, use `tsx hooks/pre-bash-denylist.ts` instead, or compile the file to JavaScript and point Claude Code at `node hooks/pre-bash-denylist.js`.
 
 ### A complete plugin via `Plugin.define` + `Plugin.write`
 
@@ -154,6 +169,25 @@ await runtime.dispose();
 
 Use `ClaudeRuntime.plugin({ cwd, pluginRoot })` when the script should treat a plugin directory as the source of truth for plugin scans and named component lookups. `ClaudeRuntime.default()` remains the right choice for platform-only scripts like one-shot plugin builders.
 
+## Features
+
+- **`Hook.runMain(hook)`** — drop-in runner that reads stdin, decodes the schema, builds a `HookContext`, runs your handler, encodes the output, and exits with the right code
+- **26 event schemas** covering the full Claude Code hook surface — permission gates, prompt gates, lifecycle events, subagent events, elicitations, worktree events, and more
+- **Decision constructors per event** — `Hook.PreToolUse.deny('reason')`, `Hook.UserPromptSubmit.block('off-topic')`, `Hook.SessionStart.addContext('extra')`
+- **`HookContext` service** — `yield* Hook.sessionId`, `yield* Hook.cwd`, `yield* Hook.transcriptPath` inside any handler
+- **`Hook.dispatch({...})`** — handle multiple event types from a single binary
+- **`Hook.Tool` + `Hook.PreToolUse.onTool(...)` / `Hook.PostToolUse.onTool(...)`** — typed adapters for common tool payloads like `Bash` and `Read`
+- **`HookBus`** — publish decoded hook events to a typed in-process `Stream`
+- **`ClaudeRuntime.default()`** — prewired `ManagedRuntime` for `FileSystem`, `Path`, and Effect logging in any effect-claudecode program
+- **`ClaudeRuntime.project({ cwd })` / `ClaudeRuntime.plugin({ cwd, pluginRoot })`** — reusable project-aware runtime presets that include cached `ClaudeProject` state
+- **`ClaudeProject.layer({ cwd })`** — cached project-scoped access to settings, `.mcp.json`, plugin directories, and named component lookups with explicit invalidation
+- **`Settings.load(cwd)`** — Effect loader that reads and merges user/project/local `settings.json` files into one typed `SettingsFile`
+- **`Plugin.define({...})` + `Plugin.write(def, dir)`** — declarative plugin builder + materializer that produces a complete plugin directory tree
+- **`Plugin.scan(dir)` / `Plugin.load(dir)` / `Plugin.sync(def)`** — inspect, round-trip, and normalize existing plugin directories
+- **`Frontmatter.parseSkillFile(path)` and friends** — one-step typed markdown loaders for skills, commands, subagents, and output styles
+- **`Mcp.loadJson(path)`** — read `.mcp.json` into a discriminated `stdio` / `http` / `sse` union with typed authorization variants
+- **Testing module** — fixtures for every event, end-to-end `runHookWithMockStdin`, `expect*Decision` helpers, mock filesystem/stdio/context layers
+
 ## Hooks
 
 ### `Hook.runMain`
@@ -175,6 +209,7 @@ For common Claude Code tools, `Hook.Tool` and the `onTool(...)` helpers remove t
 
 ```ts
 import * as Effect from 'effect/Effect';
+import * as Option from 'effect/Option';
 import { Hook } from 'effect-claudecode';
 
 const hook = Hook.PostToolUse.onTool({
@@ -805,7 +840,7 @@ Fixtures exist for all 26 events. The return type is always `string` — a JSON 
 
 ### Assertion helpers
 
-Each helper asserts an `Output` against the corresponding decision shape using `expect(...).toMatchObject(...)`:
+Each helper asserts an `Output` against the corresponding decision shape and throws when it does not match:
 
 ```ts
 Testing.expectAllowDecision(output, 'optional reason');
@@ -863,14 +898,17 @@ Complete runnable examples live in [`examples/`](./examples):
 - [`examples/session-start-inject-env.ts`](./examples/session-start-inject-env.ts) — SessionStart hook that injects session info via `Effect.gen` and the `Hook.sessionId` / `Hook.cwd` accessors
 - [`examples/post-tool-log.ts`](./examples/post-tool-log.ts) — PostToolUse hook that branches on typed input and attaches an `addContext` note for oversized tool output
 - [`examples/plugin-define-complete.ts`](./examples/plugin-define-complete.ts) — Full `Plugin.define` + `Plugin.write` end-to-end, producing a complete plugin directory under an argv-supplied path
+- [`examples/project-runtime-summary.ts`](./examples/project-runtime-summary.ts) — `ClaudeRuntime.project({ cwd })` in a one-shot script that reads cached settings and named plugin components
 
 ## Development
 
 ```sh
 bun install
-bun run check                                           # test + typecheck
+bun run check                                           # test + typecheck + build + npm pack --dry-run
+bun run build                                           # emit dist/ for the npm package
 bun run test                                            # vitest run — all tests
 bun run typecheck                                       # tsc --noEmit
+bun run pack:dry-run                                    # inspect the publish tarball contents
 bunx vitest run test/Hook/Events/PreToolUse.test.ts     # single file
 bunx vitest run -t "denies rm -rf"                      # by test name pattern
 ```
