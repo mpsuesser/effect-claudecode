@@ -81,8 +81,12 @@ export class StdioMcpServer extends Schema.Class<StdioMcpServer>(
 	command: Schema.String,
 	args: Schema.optional(Schema.Array(Schema.String)),
 	env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-	/** @deprecated Not documented in current Claude Code MCP config. */
+	/** @deprecated Decode-only legacy field; not emitted for current Claude Code. */
 	cwd: Schema.optional(Schema.String),
+	/**
+	 * Tool-execution timeout in milliseconds; values below 1000 are ignored
+	 * by Claude Code.
+	 */
 	timeout: Schema.optional(Schema.Number),
 	alwaysLoad: Schema.optional(Schema.Boolean)
 }) {}
@@ -101,8 +105,12 @@ export class HttpMcpServer extends Schema.Class<HttpMcpServer>(
 	url: Schema.String,
 	headers: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 	headersHelper: Schema.optional(Schema.String),
-	/** @deprecated Not documented in current Claude Code MCP config. */
+	/** @deprecated Decode-only legacy field; not emitted for current Claude Code. */
 	allowedEnvVars: Schema.optional(Schema.Array(Schema.String)),
+	/**
+	 * Tool-execution timeout in milliseconds; values below 1000 are ignored
+	 * by Claude Code.
+	 */
 	timeout: Schema.optional(Schema.Number),
 	alwaysLoad: Schema.optional(Schema.Boolean),
 	oauth: Schema.optional(McpOAuth),
@@ -121,6 +129,10 @@ export class WsMcpServer extends Schema.Class<WsMcpServer>('WsMcpServer')({
 	url: Schema.String,
 	headers: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 	headersHelper: Schema.optional(Schema.String),
+	/**
+	 * Tool-execution timeout in milliseconds; values below 1000 are ignored
+	 * by Claude Code.
+	 */
 	timeout: Schema.optional(Schema.Number),
 	alwaysLoad: Schema.optional(Schema.Boolean)
 }) {}
@@ -138,6 +150,10 @@ export class SseMcpServer extends Schema.Class<SseMcpServer>('SseMcpServer')({
 	url: Schema.String,
 	headers: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 	headersHelper: Schema.optional(Schema.String),
+	/**
+	 * Tool-execution timeout in milliseconds; values below 1000 are ignored
+	 * by Claude Code.
+	 */
 	timeout: Schema.optional(Schema.Number),
 	alwaysLoad: Schema.optional(Schema.Boolean),
 	oauth: Schema.optional(McpOAuth),

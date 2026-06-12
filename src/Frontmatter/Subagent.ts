@@ -7,6 +7,12 @@
  * other fields such as `effort`, `maxTurns`, and `disallowedTools`
  * apply.
  *
+ * This schema deliberately keeps `name`, `memory`, and `isolation`
+ * permissive so future Claude Code enum additions do not make existing
+ * agents fail to decode. Current docs describe lowercase hyphenated
+ * names and `memory` values of `user`, `project`, and `local`; enforce
+ * those constraints in lint/validation layers when desired.
+ *
  * @since 0.1.0
  */
 import * as Schema from 'effect/Schema';

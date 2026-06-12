@@ -18,15 +18,22 @@
  * ├── skills/<name>/SKILL.md
  * ├── output-styles/<name>.md
  * ├── hooks/hooks.json          (if hooksConfig provided)
- * └── .mcp.json                 (if mcpConfig provided)
+ * ├── .mcp.json                 (if mcpConfig provided)
+ * ├── .lsp.json                 (preserved when loaded from disk)
+ * ├── themes/                   (preserved when loaded from disk)
+ * ├── monitors/                 (preserved when loaded from disk)
+ * ├── bin/                      (preserved when loaded from disk)
+ * └── settings.json             (preserved when loaded from disk)
  * ```
  *
  * @since 0.1.0
  */
+import * as Arr from 'effect/Array';
 import * as Effect from 'effect/Effect';
 import * as FileSystem from 'effect/FileSystem';
 import * as Option from 'effect/Option';
 import * as Path from 'effect/Path';
+import * as P from 'effect/Predicate';
 import * as Schema from 'effect/Schema';
 
 import {
@@ -57,6 +64,7 @@ import {
 	isJsonFilePath,
 	isMarkdownFilePath,
 	isSkillFilePath,
+	normalizeManifestPath,
 	pathSpecs,
 	syncManifest
 } from './Layout.ts';
@@ -644,6 +652,89 @@ const toJsonFileContent = (value: unknown): string =>
 	// printer that preserves 2-space indent.
 	`${JSON.stringify(value, null, 2)}\n`;
 
+const sourceRootDir = (
+	definition: PluginDefinition
+): Option.Option<string> => {
+	const candidate: unknown = definition;
+	if (!P.hasProperty(candidate, 'rootDir')) {
+		return Option.none();
+	}
+	return P.isString(candidate.rootDir)
+		? Option.some(candidate.rootDir)
+		: Option.none();
+};
+
+const copyPathIfExists = (
+	fromPath: string,
+	toPath: string
+): Effect.Effect<void, PluginWriteError, FileSystem.FileSystem> =>
+	Effect.gen(function* () {
+		const fileSystem = yield* FileSystem.FileSystem;
+		const exists = yield* fileSystem.exists(fromPath).pipe(
+			Effect.mapError((cause) =>
+				new PluginWriteError({ path: fromPath, cause })
+			)
+		);
+		if (!exists || fromPath === toPath) {
+			return;
+		}
+		yield* fileSystem.copy(fromPath, toPath, { overwrite: true }).pipe(
+			Effect.mapError((cause) =>
+				new PluginWriteError({ path: fromPath, cause })
+			)
+		);
+	});
+
+const staticPathSpecs = (
+	spec: unknown,
+	fallback: string
+): ReadonlyArray<string> => {
+	if (spec === undefined) {
+		return [fallback];
+	}
+	if (typeof spec === 'string' || Array.isArray(spec)) {
+		return pathSpecs(Option.some(spec));
+	}
+	return [];
+};
+
+const copyLoadedStaticLayout = (
+	definition: PluginDefinition,
+	destDir: string
+): Effect.Effect<void, PluginWriteError, FileSystem.FileSystem | Path.Path> =>
+	Option.match(sourceRootDir(definition), {
+		onNone: () => Effect.void,
+		onSome: (rootDir) =>
+			Effect.gen(function* () {
+				const path = yield* Path.Path;
+				const relativePaths = Arr.dedupe(
+					Arr.flatten([
+						staticPathSpecs(definition.manifest.lspServers, '.lsp.json'),
+						staticPathSpecs(
+							definition.manifest.experimental?.themes,
+							'themes'
+						),
+						staticPathSpecs(
+							definition.manifest.experimental?.monitors,
+							'monitors/monitors.json'
+						),
+						['bin', 'settings.json']
+					])
+				);
+				yield* Effect.forEach(
+					relativePaths,
+					(relativePath) => {
+						const normalized = normalizeManifestPath(relativePath);
+						return copyPathIfExists(
+							path.join(rootDir, normalized),
+							path.join(destDir, normalized)
+						);
+					},
+					{ concurrency: 1 }
+				).pipe(Effect.asVoid);
+			})
+	});
+
 /** @internal */
 const manifestForWrite = (manifest: PluginManifest): PluginManifest =>
 	Option.match(Option.fromNullishOr(manifest.mcpServers), {
@@ -793,4 +884,6 @@ export const write = (
 				);
 			}
 		}
+
+		yield* copyLoadedStaticLayout(definition, destDir);
 	});

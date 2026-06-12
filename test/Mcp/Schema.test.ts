@@ -2,8 +2,8 @@
  * Tests for the `Mcp.McpServerConfig` discriminated union and the
  * `Mcp.McpJsonFile` + `Mcp.loadJson` pair.
  *
- * Decode tests cover each transport (`stdio`, `http`, `sse`) with
- * representative shapes; authorization variants are smoke-tested
+ * Decode tests cover each transport (`stdio`, `http`, `ws`, `sse`) with
+ * representative shapes; legacy authorization variants are smoke-tested
  * through the HTTP transport. The loader is exercised against an
  * in-memory `FileSystem.layerNoop` to confirm the happy path plus
  * I/O, parse, and decode error wrapping.
@@ -91,7 +91,7 @@ describe('McpServerConfig — stdio', () => {
 		})
 	);
 
-	it.effect('decodes a full stdio server with args, env, cwd, timeout', () =>
+	it.effect('decodes a full stdio server with args, env, legacy cwd, timeout', () =>
 		Effect.gen(function* () {
 			const server = yield* decodeServer({
 				type: 'stdio',
@@ -102,7 +102,7 @@ describe('McpServerConfig — stdio', () => {
 					API_KEY: 'secret'
 				},
 				cwd: '/app',
-				timeout: 30
+				timeout: 600000
 			});
 			expect(server).toMatchObject({
 				type: 'stdio',
@@ -110,7 +110,7 @@ describe('McpServerConfig — stdio', () => {
 				args: ['./server.js', '--port', '3000'],
 				env: { NODE_ENV: 'production', API_KEY: 'secret' },
 				cwd: '/app',
-				timeout: 30
+				timeout: 600000
 			});
 		})
 	);
@@ -606,7 +606,7 @@ describe('Mcp.loadEffective', () => {
 // ---------------------------------------------------------------------------
 
 describe('Mcp.toClaudeCodeJson', () => {
-	it.effect('omits legacy authorization blocks from emitted config', () =>
+	it.effect('omits decode-only legacy fields from emitted config', () =>
 		Effect.gen(function* () {
 			const file = yield* decodeFile({
 				mcpServers: {
@@ -614,10 +614,16 @@ describe('Mcp.toClaudeCodeJson', () => {
 						type: 'http',
 						url: 'https://api.example.com/mcp',
 						oauth: { scopes: 'read write' },
+						allowedEnvVars: ['API_KEY'],
 						authorization: {
 							type: 'bearer',
 							token: 'legacy-token'
 						}
+					},
+					local: {
+						command: 'local-server',
+						cwd: '/legacy/cwd',
+						timeout: 600000
 					},
 					workspace: { command: 'reserved' }
 				}
@@ -629,6 +635,10 @@ describe('Mcp.toClaudeCodeJson', () => {
 						type: 'http',
 						url: 'https://api.example.com/mcp',
 						oauth: { scopes: 'read write' }
+					},
+					local: {
+						command: 'local-server',
+						timeout: 600000
 					}
 				}
 			});

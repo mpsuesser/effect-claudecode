@@ -362,7 +362,6 @@ const serializeServerForCurrentClaudeCode = (
 			command: server.command,
 			...optionalJsonField('args', server.args),
 			...optionalJsonField('env', server.env),
-			...optionalJsonField('cwd', server.cwd),
 			...optionalJsonField('timeout', server.timeout),
 			...optionalJsonField('alwaysLoad', server.alwaysLoad)
 		};
@@ -373,7 +372,6 @@ const serializeServerForCurrentClaudeCode = (
 			url: server.url,
 			...optionalJsonField('headers', server.headers),
 			...optionalJsonField('headersHelper', server.headersHelper),
-			...optionalJsonField('allowedEnvVars', server.allowedEnvVars),
 			...optionalJsonField('timeout', server.timeout),
 			...optionalJsonField('alwaysLoad', server.alwaysLoad),
 			...optionalJsonField('oauth', server.oauth)
@@ -403,9 +401,11 @@ const serializeServerForCurrentClaudeCode = (
 /**
  * Convert an MCP config into the current Claude Code JSON shape.
  *
- * Deprecated legacy `authorization` blocks are intentionally omitted;
- * current Claude Code uses `oauth` for OAuth and plain `headers` /
- * `headersHelper` for bearer or API-key style authentication.
+ * Deprecated legacy `authorization`, stdio `cwd`, and HTTP
+ * `allowedEnvVars` fields are intentionally decode-only and omitted;
+ * current Claude Code uses `oauth` for OAuth, plain `headers` /
+ * `headersHelper` for bearer or API-key style authentication, and
+ * `${VAR}` expansion syntax for environment placeholders.
  *
  * @category Serializers
  * @since 0.1.0

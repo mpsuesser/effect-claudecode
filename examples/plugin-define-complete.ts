@@ -71,7 +71,7 @@ const plugin = Plugin.define({
 					{
 						type: 'command',
 						command:
-							'bun ${CLAUDE_PLUGIN_ROOT}/hooks/post-read-source-hint.ts'
+							'bun "${CLAUDE_PLUGIN_ROOT}"/hooks/post-read-source-hint.ts'
 					}
 				]
 			}

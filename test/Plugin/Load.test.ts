@@ -9,6 +9,7 @@
 import { describe, expect, it } from '@effect/vitest';
 import * as Effect from 'effect/Effect';
 import * as Option from 'effect/Option';
+import * as Schema from 'effect/Schema';
 
 import { PluginLoadError } from '../../src/Errors.ts';
 import * as Plugin from '../../src/Plugin.ts';
@@ -21,6 +22,8 @@ import * as Testing from '../../src/Testing.ts';
 const fsWith = (
 	entries: ReadonlyArray<readonly [string, string]>
 ): ReadonlyMap<string, string> => new Map(entries);
+
+const toJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString);
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -155,6 +158,96 @@ describe('Plugin.scan', () => {
 								}
 							})
 						]
+					])
+				)
+				.layer
+			)
+		)
+	);
+
+	it.effect('discovers the default .lsp.json fallback', () =>
+		Effect.gen(function* () {
+			const scanned = yield* Plugin.scan('/plugin');
+
+			expect(scanned.lspPaths).toEqual(['/plugin/.lsp.json']);
+			expect(scanned.inferredManifest.lspServers).toBe('.lsp.json');
+		}).pipe(
+			Effect.provide(
+				Testing.makeMockFileSystem(
+					fsWith([
+						[
+							'/plugin/.claude-plugin/plugin.json',
+							toJsonString({ name: 'lsp-plugin' })
+						],
+						[
+							'/plugin/.lsp.json',
+							toJsonString({
+								go: {
+									command: 'gopls',
+									extensionToLanguage: { '.go': 'go' }
+								}
+							})
+						]
+					])
+				)
+				.layer
+			)
+		)
+	);
+
+	it.effect('de-dupes default and declared skill paths', () =>
+		Effect.gen(function* () {
+			const scanned = yield* Plugin.scan('/plugin');
+
+			expect(scanned.skillPaths).toEqual(['/plugin/skills/greet/SKILL.md']);
+		}).pipe(
+			Effect.provide(
+				Testing.makeMockFileSystem(
+					fsWith([
+						[
+							'/plugin/.claude-plugin/plugin.json',
+							toJsonString({ name: 'skills-plugin', skills: './skills' })
+						],
+						[
+							'/plugin/skills/greet/SKILL.md',
+							'---\nname: greet\ndescription: Say hi\n---\n\n# Greet\n'
+						]
+					])
+				)
+				.layer
+			)
+		)
+	);
+
+	it.effect('discovers default experimental, bin, and settings files', () =>
+		Effect.gen(function* () {
+			const scanned = yield* Plugin.scan('/plugin');
+
+			expect(scanned.themePaths).toEqual(['/plugin/themes/dark.json']);
+			expect(scanned.monitorPaths).toEqual(['/plugin/monitors/monitors.json']);
+			expect(scanned.binPaths).toEqual(['/plugin/bin/helper']);
+			expect(Option.getOrUndefined(scanned.settingsPath)).toBe(
+				'/plugin/settings.json'
+			);
+			expect(scanned.inferredManifest.experimental).toMatchObject({
+				themes: 'themes',
+				monitors: 'monitors/monitors.json'
+			});
+		}).pipe(
+			Effect.provide(
+				Testing.makeMockFileSystem(
+					fsWith([
+						[
+							'/plugin/.claude-plugin/plugin.json',
+							toJsonString({ name: 'experimental-plugin' })
+						],
+						['/plugin/themes/dark.json', toJsonString({ name: 'dark' })],
+						[
+							'/plugin/monitors/monitors.json',
+							toJsonString({ monitors: [] })
+						],
+						['/plugin/bin/helper', '#!/usr/bin/env bash\n'],
+						['/plugin/settings.json', toJsonString({})]
 					])
 				)
 				.layer
@@ -347,10 +440,10 @@ describe('Plugin.sync', () => {
 		expect(synced.manifest).toMatchObject({
 			name: 'guardrails',
 			description: 'Guardrail hooks',
-			commands: 'old-commands',
-			skills: 'skills',
-			hooks: 'old-hooks.json'
+			commands: './old-commands',
+			hooks: './old-hooks.json'
 		});
+		expect(synced.manifest.skills).toBeUndefined();
 		expect(synced.manifest.agents).toBeUndefined();
 		expect(synced.manifest.outputStyles).toBeUndefined();
 	});

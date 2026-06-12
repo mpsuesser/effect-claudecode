@@ -75,11 +75,36 @@ describe('SkillFrontmatter', () => {
 			const skill = yield* decodeSkill({
 				name: 's',
 				description: 'd',
-				effort: 'high',
+				effort: 'xhigh',
 				shell: 'bash'
 			});
-			expect(skill.effort).toBe('high');
+			expect(skill.effort).toBe('xhigh');
 			expect(skill.shell).toBe('bash');
+		})
+	);
+
+	it.effect('decodes current invocation and metadata fields', () =>
+		Effect.gen(function* () {
+			const skill = yield* decodeSkill({
+				name: 'effect-helper',
+				description: 'Help with Effect code',
+				when_to_use: 'Use for Effect v4 APIs',
+				arguments: ['file', 'topic'],
+				paths: 'src/**, test/**',
+				'disallowed-tools': 'WebFetch, WebSearch',
+				license: 'MIT',
+				metadata: { owner: 'platform' },
+				compatibility: 'Claude Code'
+			});
+			expect(skill).toMatchObject({
+				when_to_use: 'Use for Effect v4 APIs',
+				arguments: ['file', 'topic'],
+				paths: 'src/**, test/**',
+				'disallowed-tools': 'WebFetch, WebSearch',
+				license: 'MIT',
+				metadata: { owner: 'platform' },
+				compatibility: 'Claude Code'
+			});
 		})
 	);
 
@@ -158,6 +183,33 @@ describe('SubagentFrontmatter', () => {
 		})
 	);
 
+	it.effect('decodes current subagent fields', () =>
+		Effect.gen(function* () {
+			const agent = yield* decodeSubagent({
+				name: 'researcher',
+				description: 'Researches a topic',
+				effort: 'xhigh',
+				color: 'cyan',
+				initialPrompt: 'Start by reading the README.',
+				memory: 'project',
+				mcpServers: [
+					'filesystem',
+					{ browser: { type: 'http', url: 'https://mcp.example.com' } }
+				]
+			});
+			expect(agent).toMatchObject({
+				effort: 'xhigh',
+				color: 'cyan',
+				initialPrompt: 'Start by reading the README.',
+				memory: 'project',
+				mcpServers: [
+					'filesystem',
+					{ browser: { type: 'http', url: 'https://mcp.example.com' } }
+				]
+			});
+		})
+	);
+
 	it.effect('rejects a subagent missing the required name field', () =>
 		Effect.gen(function* () {
 			const error = yield* Effect.flip(
@@ -181,20 +233,48 @@ describe('CommandFrontmatter', () => {
 		})
 	);
 
-	it.effect('decodes a full command frontmatter with kebab-case keys', () =>
+	it.effect('decodes a full command frontmatter with skill-style fields', () =>
 		Effect.gen(function* () {
 			const cmd = yield* decodeCommand({
+				name: 'commit',
 				description: 'Commit staged changes',
+				when_to_use: 'Use for git commits',
+				arguments: 'message scope',
 				'argument-hint': '<message>',
 				'allowed-tools': ['Bash'],
+				'disallowed-tools': 'WebFetch',
 				'disable-model-invocation': false,
-				model: 'haiku'
+				'user-invocable': true,
+				context: 'fork',
+				agent: 'reviewer',
+				effort: 'xhigh',
+				paths: ['src/**'],
+				shell: 'bash',
+				model: 'haiku',
+				hooks: {
+					PreToolUse: [
+						{
+							matcher: 'Bash',
+							hooks: [{ type: 'mcp_tool', server: 'policy', tool: 'check' }]
+						}
+					]
+				}
 			});
 			expect(cmd).toMatchObject({
+				name: 'commit',
 				description: 'Commit staged changes',
+				when_to_use: 'Use for git commits',
+				arguments: 'message scope',
 				'argument-hint': '<message>',
 				'allowed-tools': ['Bash'],
+				'disallowed-tools': 'WebFetch',
 				'disable-model-invocation': false,
+				'user-invocable': true,
+				context: 'fork',
+				agent: 'reviewer',
+				effort: 'xhigh',
+				paths: ['src/**'],
+				shell: 'bash',
 				model: 'haiku'
 			});
 		})
@@ -232,6 +312,21 @@ describe('OutputStyleFrontmatter', () => {
 			const style = yield* decodeOutputStyle({});
 			expect(style.name).toBeUndefined();
 			expect(style.description).toBeUndefined();
+		})
+	);
+
+	it.effect('decodes plugin-only output style flags', () =>
+		Effect.gen(function* () {
+			const style = yield* decodeOutputStyle({
+				name: 'coding-style',
+				'keep-coding-instructions': true,
+				'force-for-plugin': true
+			});
+			expect(style).toMatchObject({
+				name: 'coding-style',
+				'keep-coding-instructions': true,
+				'force-for-plugin': true
+			});
 		})
 	);
 });

@@ -2,9 +2,10 @@
  * CwdChanged hook event.
  *
  * Fires when the working directory changes (e.g. via a `cd` command).
- * Observability-only — no decision control. The most common use-case is
- * persisting environment variables via `$CLAUDE_ENV_FILE`. Does not
- * support a matcher.
+ * Observability-only — no decision control. One common use-case is
+ * persisting environment variables via `$CLAUDE_ENV_FILE`, which Claude
+ * Code also exposes to SessionStart, Setup, and FileChanged hooks. Does
+ * not support a matcher.
  * See https://code.claude.com/docs/en/hooks#cwdchanged.
  *
  * @since 0.1.0

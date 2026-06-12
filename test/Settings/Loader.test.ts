@@ -363,7 +363,7 @@ describe('Settings.load — merging', () => {
 // ---------------------------------------------------------------------------
 
 describe('Settings.load — complex structures', () => {
-	it.effect('decodes a hooks section with command entries', () =>
+	it.effect('decodes a hooks section with current handler fields', () =>
 		Effect.gen(function* () {
 			const settings = yield* Loader.load(CWD);
 			expect(settings).toMatchObject({
@@ -375,7 +375,25 @@ describe('Settings.load — complex structures', () => {
 								{
 									type: 'command',
 									command: 'bun hook.ts',
-									timeout: 30
+									args: ['--strict'],
+									if: 'Bash(git *)',
+									asyncRewake: true,
+									statusMessage: 'checking command',
+									once: true,
+									timeout: 5000
+								},
+								{
+									type: 'mcp_tool',
+									server: 'policy',
+									tool: 'check',
+									input: { path: '${tool_input.file_path}' },
+									if: 'Read(*)'
+								},
+								{
+									type: 'http',
+									url: 'https://hooks.example.com/check',
+									allowedEnvVars: ['TOKEN'],
+									if: 'Write|Edit'
 								}
 							]
 						}
@@ -397,7 +415,25 @@ describe('Settings.load — complex structures', () => {
 												{
 													type: 'command',
 													command: 'bun hook.ts',
-													timeout: 30
+													args: ['--strict'],
+													if: 'Bash(git *)',
+													asyncRewake: true,
+													statusMessage: 'checking command',
+													once: true,
+													timeout: 5000
+												},
+												{
+													type: 'mcp_tool',
+													server: 'policy',
+													tool: 'check',
+													input: { path: '${tool_input.file_path}' },
+													if: 'Read(*)'
+												},
+												{
+													type: 'http',
+													url: 'https://hooks.example.com/check',
+													allowedEnvVars: ['TOKEN'],
+													if: 'Write|Edit'
 												}
 											]
 										}
@@ -451,7 +487,8 @@ describe('Settings.load — complex structures', () => {
 				statusLine: {
 					type: 'command',
 					command: 'bun status.ts',
-					padding: 2
+					padding: 2,
+					refreshInterval: 5
 				}
 			});
 		}).pipe(
@@ -464,7 +501,125 @@ describe('Settings.load — complex structures', () => {
 								statusLine: {
 									type: 'command',
 									command: 'bun status.ts',
-									padding: 2
+									padding: 2,
+									refreshInterval: 5
+								}
+							})
+						]
+					])
+				)
+			)
+		));
+
+	it.effect('decodes sandbox, attribution, effortLevel, and preserves raw keys', () =>
+		Effect.gen(function* () {
+			const settings = yield* Loader.load(CWD);
+			expect(settings).toMatchObject({
+				effortLevel: 'xhigh',
+				attribution: { commit: '', pr: 'Co-authored-by: Claude' },
+				sandbox: {
+					enabled: true,
+					filesystem: {
+						allowWrite: ['/repo/tmp'],
+						denyRead: ['/repo/secrets']
+					},
+					network: {
+						allowedDomains: ['api.example.com'],
+						httpProxyPort: 8080
+					}
+				},
+				raw: {
+					futureClaudeCodeSetting: { enabled: true }
+				}
+			});
+		}).pipe(
+			Effect.provide(
+				makeTestLayer(
+					fsWith([
+						[
+							PROJECT_PATH,
+							settingsJson({
+								effortLevel: 'xhigh',
+								attribution: {
+									commit: '',
+									pr: 'Co-authored-by: Claude'
+								},
+								sandbox: {
+									enabled: true,
+									filesystem: {
+										allowWrite: ['/repo/tmp'],
+										denyRead: ['/repo/secrets']
+									},
+									network: {
+										allowedDomains: ['api.example.com'],
+										httpProxyPort: 8080
+									}
+								},
+								futureClaudeCodeSetting: { enabled: true }
+							})
+						]
+					])
+				)
+			)
+		));
+
+	it.effect('decodes current extraKnownMarketplaces source variants', () =>
+		Effect.gen(function* () {
+			const settings = yield* Loader.load(CWD);
+			expect(settings).toMatchObject({
+				extraKnownMarketplaces: {
+					company: {
+						autoUpdate: true,
+						source: {
+							source: 'git',
+							url: 'https://git.example.com/marketplace.git',
+							path: 'catalog',
+							skipLfs: true
+						}
+					},
+					trustedHosts: {
+						source: {
+							source: 'hostPattern',
+							pattern: 'https://plugins.example.com/*'
+						}
+					},
+					inline: {
+						source: {
+							source: 'settings',
+							name: 'inline-marketplace'
+						}
+					}
+				}
+			});
+		}).pipe(
+			Effect.provide(
+				makeTestLayer(
+					fsWith([
+						[
+							PROJECT_PATH,
+							settingsJson({
+								extraKnownMarketplaces: {
+									company: {
+										autoUpdate: true,
+										source: {
+											source: 'git',
+											url: 'https://git.example.com/marketplace.git',
+											path: 'catalog',
+											skipLfs: true
+										}
+									},
+									trustedHosts: {
+										source: {
+											source: 'hostPattern',
+											pattern: 'https://plugins.example.com/*'
+										}
+									},
+									inline: {
+										source: {
+											source: 'settings',
+											name: 'inline-marketplace'
+										}
+									}
 								}
 							})
 						]

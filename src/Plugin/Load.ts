@@ -17,6 +17,7 @@ import * as Option from 'effect/Option';
 import * as Order from 'effect/Order';
 import * as Path from 'effect/Path';
 import * as Schema from 'effect/Schema';
+import * as Str from 'effect/String';
 
 import { PluginLoadError } from '../Errors.ts';
 import {
@@ -42,7 +43,7 @@ import {
 	type PluginOutputStyleEntry,
 	type PluginSkillEntry
 } from './Define.ts';
-import { PluginManifest } from './Manifest.ts';
+import { ExperimentalSpec, PluginManifest } from './Manifest.ts';
 
 // ---------------------------------------------------------------------------
 // Models
@@ -66,6 +67,11 @@ export interface PluginScan {
 	readonly inlineHooksConfig: Option.Option<Schema.Schema.Type<typeof HooksSection>>;
 	readonly mcpPaths: ReadonlyArray<string>;
 	readonly inlineMcpConfig: Option.Option<McpJsonFile>;
+	readonly lspPaths: ReadonlyArray<string>;
+	readonly themePaths: ReadonlyArray<string>;
+	readonly monitorPaths: ReadonlyArray<string>;
+	readonly binPaths: ReadonlyArray<string>;
+	readonly settingsPath: Option.Option<string>;
 	readonly inferredManifest: PluginManifest;
 }
 
@@ -261,6 +267,27 @@ const markdownFilePaths = (
 			.map((entry) => path.join(dirPath, entry))
 	);
 
+const jsonFilePaths = (
+	dirPath: string,
+	entries: ReadonlyArray<string>,
+	path: Path.Path
+): ReadonlyArray<string> =>
+	listSorted(
+		Arr.map(
+			Arr.filter(entries, (entry) => Str.endsWith('.json')(entry)),
+			(entry) => path.join(dirPath, entry)
+		)
+	);
+
+const filePathIfExists = (
+	filePath: string
+): Effect.Effect<Option.Option<string>, PluginLoadError, FileSystem.FileSystem> =>
+	readOptionalStringFile(filePath).pipe(
+		Effect.map((maybeContent) =>
+			Option.isSome(maybeContent) ? Option.some(filePath) : Option.none()
+		)
+	);
+
 const relativeManifestPaths = (
 	spec: Option.Option<string | ReadonlyArray<string>>
 ): ReadonlyArray<string> => pathSpecs(spec);
@@ -382,7 +409,7 @@ const expandSkillPathSpec = (options: {
 			{ concurrency: 1 }
 		);
 
-		return listSorted([...defaultSkillPaths, ...resolved.flat()]);
+		return listSorted(Arr.dedupe([...defaultSkillPaths, ...resolved.flat()]));
 	});
 
 const expandJsonPathSpec = (options: {
@@ -417,6 +444,38 @@ const expandJsonPathSpec = (options: {
 				}),
 			{ concurrency: 1 }
 		);
+	});
+
+const expandJsonFilePathSpec = (options: {
+	readonly rootDir: string;
+	readonly spec: Option.Option<string | ReadonlyArray<string>>;
+	readonly fallbackDir: string;
+}): Effect.Effect<ReadonlyArray<string>, PluginLoadError, FileSystem.FileSystem | Path.Path> =>
+	Effect.gen(function* () {
+		const path = yield* Path.Path;
+		const declared = relativeManifestPaths(options.spec);
+		if (declared.length === 0) {
+			const dirPath = path.join(options.rootDir, options.fallbackDir);
+			const entries = yield* readDirectoryIfExists(dirPath);
+			return jsonFilePaths(dirPath, entries, path);
+		}
+
+		const resolved = yield* Effect.forEach(
+			declared,
+			(relativePath) =>
+				Effect.gen(function* () {
+					const absolutePath = path.join(options.rootDir, relativePath);
+					yield* requireExistingPath(absolutePath);
+					if (isJsonFilePath(relativePath)) {
+						return [absolutePath];
+					}
+					const entries = yield* readDirectoryIfExists(absolutePath);
+					return jsonFilePaths(absolutePath, entries, path);
+				}),
+			{ concurrency: 1 }
+		);
+
+		return listSorted(resolved.flat());
 	});
 
 const inlineHooksConfigFromManifest = (
@@ -461,15 +520,25 @@ const inferredManifest = (input: {
 	readonly outputStylesSpec: string | ReadonlyArray<string> | undefined;
 	readonly hooksSpec: PluginManifest['hooks'];
 	readonly mcpSpec: PluginManifest['mcpServers'];
+	readonly lspSpec: PluginManifest['lspServers'];
+	readonly themeSpec: ExperimentalSpec['themes'];
+	readonly monitorSpec: ExperimentalSpec['monitors'];
 	readonly commandCount: number;
 	readonly agentCount: number;
 	readonly skillCount: number;
 	readonly outputStyleCount: number;
 	readonly hasHooks: boolean;
 	readonly hasMcp: boolean;
+	readonly hasLsp: boolean;
+	readonly hasThemes: boolean;
+	readonly hasMonitors: boolean;
 }): PluginManifest => {
 	const base = Option.match(input.sourceManifest, {
-		onNone: () => ({ name: input.pluginName }),
+		onNone: () => ({
+			name: input.pluginName,
+			experimental: undefined,
+			lspServers: undefined
+		}),
 		onSome: (manifest) => ({
 			name: manifest.name,
 			$schema: manifest.$schema,
@@ -490,8 +559,22 @@ const inferredManifest = (input: {
 		})
 	});
 
+	const inferredExperimental =
+		input.hasThemes || input.hasMonitors
+			? new ExperimentalSpec({
+					...(base.experimental ?? {}),
+					...(input.hasThemes
+						? { themes: input.themeSpec ?? 'themes' }
+						: {}),
+					...(input.hasMonitors
+						? { monitors: input.monitorSpec ?? 'monitors/monitors.json' }
+						: {})
+				})
+			: base.experimental;
+
 	return new PluginManifest({
 		...base,
+		experimental: inferredExperimental,
 		...(input.commandCount > 0
 			? { commands: input.commandsSpec ?? 'commands' }
 			: {}),
@@ -501,7 +584,8 @@ const inferredManifest = (input: {
 			? { outputStyles: input.outputStylesSpec ?? 'output-styles' }
 			: {}),
 		...(input.hasHooks ? { hooks: input.hooksSpec ?? 'hooks/hooks.json' } : {}),
-		...(input.hasMcp ? { mcpServers: input.mcpSpec ?? '.mcp.json' } : {})
+		...(input.hasMcp ? { mcpServers: input.mcpSpec ?? '.mcp.json' } : {}),
+		...(input.hasLsp ? { lspServers: input.lspSpec ?? '.lsp.json' } : {})
 	});
 };
 
@@ -734,6 +818,37 @@ export const scan = (
 							: Option.none<string | ReadonlyArray<string>>(),
 					fallbackPath: '.mcp.json'
 				});
+		const lspPaths =
+			typeof manifest?.lspServers !== 'string' &&
+			!Array.isArray(manifest?.lspServers) &&
+			manifest?.lspServers !== undefined
+				? []
+				: yield* expandJsonPathSpec({
+						rootDir,
+						spec:
+							typeof manifest?.lspServers === 'string' ||
+							Array.isArray(manifest?.lspServers)
+								? Option.some(manifest.lspServers)
+								: Option.none<string | ReadonlyArray<string>>(),
+						fallbackPath: '.lsp.json'
+					});
+		const themePaths = yield* expandJsonFilePathSpec({
+			rootDir,
+			spec: Option.fromNullishOr(manifest?.experimental?.themes),
+			fallbackDir: 'themes'
+		});
+		const monitorPaths = yield* expandJsonPathSpec({
+			rootDir,
+			spec: Option.fromNullishOr(manifest?.experimental?.monitors),
+			fallbackPath: 'monitors/monitors.json'
+		});
+		const binEntries = yield* readDirectoryIfExists(path.join(rootDir, 'bin'));
+		const binPaths = Arr.map(binEntries, (entry) =>
+			path.join(rootDir, 'bin', entry)
+		);
+		const settingsPath = yield* filePathIfExists(
+			path.join(rootDir, 'settings.json')
+		);
 		const pluginName = Option.match(sourceManifest, {
 			onNone: () => path.basename(rootDir),
 			onSome: (manifest) => manifest.name
@@ -753,6 +868,11 @@ export const scan = (
 				inlineHooksConfig,
 				mcpPaths,
 				inlineMcpConfig,
+				lspPaths,
+				themePaths,
+				monitorPaths,
+				binPaths,
+				settingsPath,
 				inferredManifest: inferredManifest({
 					pluginName,
 					sourceManifest,
@@ -762,13 +882,23 @@ export const scan = (
 					outputStylesSpec: manifest?.outputStyles,
 					hooksSpec: manifest?.hooks,
 					mcpSpec: manifest?.mcpServers,
+					lspSpec: manifest?.lspServers,
+					themeSpec: manifest?.experimental?.themes,
+					monitorSpec: manifest?.experimental?.monitors,
 					commandCount: commandPaths.length,
 					agentCount: agentPaths.length,
 					skillCount: skillPaths.length,
 					outputStyleCount: outputStylePaths.length,
 					hasHooks:
 						Option.isSome(inlineHooksConfig) || hooksPaths.length > 0,
-					hasMcp: Option.isSome(inlineMcpConfig) || mcpPaths.length > 0
+					hasMcp: Option.isSome(inlineMcpConfig) || mcpPaths.length > 0,
+					hasLsp:
+						(manifest?.lspServers !== undefined &&
+							typeof manifest.lspServers !== 'string' &&
+							!Array.isArray(manifest.lspServers)) ||
+						lspPaths.length > 0,
+					hasThemes: themePaths.length > 0,
+					hasMonitors: monitorPaths.length > 0
 				})
 			};
 		})(rootDir);

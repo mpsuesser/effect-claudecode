@@ -6,6 +6,12 @@
  * frontmatter fields are optional in Claude Code; `name` falls back to
  * the directory name and `description` can fall back to the body.
  *
+ * This schema intentionally stays permissive for Claude Code runtime
+ * compatibility. The stricter Agent Skills open-standard constraints
+ * (for example lowercase hyphenated names, length limits, and
+ * name-matches-directory checks) are better enforced by plugin linting
+ * where the file path is available.
+ *
  * Note: Claude Code uses kebab-cased keys in some frontmatter fields
  * (`disable-model-invocation`, `user-invocable`, `allowed-tools`,
  * `disallowed-tools`, `argument-hint`). `Schema.Class` preserves the

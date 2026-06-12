@@ -7,6 +7,8 @@
  *
  * @since 0.1.0
  */
+import { pipe } from 'effect';
+import * as Arr from 'effect/Array';
 import * as Cause from 'effect/Cause';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
@@ -693,7 +695,8 @@ export type MockFileSystemOperation =
 	| 'writeFileString'
 	| 'makeDirectory'
 	| 'readDirectory'
-	| 'remove';
+	| 'remove'
+	| 'copy';
 
 /**
  * Options for the in-memory file system harness.
@@ -912,6 +915,61 @@ export const makeMockFileSystem = (
 
 	const layer = Layer.mergeAll(
 		FileSystem.layerNoop({
+			copy: (fromPath: string, toPath: string) => {
+				const failure = failIfRequested('copy', fromPath);
+				if (Option.isSome(failure)) {
+					return Effect.fail(failure.value);
+				}
+				const sourceDir = normalizeDirectoryPath(fromPath);
+				if (!fileMap.has(fromPath) && !directories.has(sourceDir)) {
+					return Effect.fail(notFoundError(fromPath, 'copy'));
+				}
+				return Effect.sync(() => {
+					const addDirectories = (paths: ReadonlyArray<string>): void => {
+						Arr.forEach(paths, (directory) => {
+							directories.add(directory);
+						});
+					};
+
+					if (fileMap.has(fromPath)) {
+						const content = fileMap.get(fromPath);
+						if (content !== undefined) {
+							addDirectories(ancestorDirectories(parentDirectory(toPath)));
+							fileMap.set(toPath, content);
+						}
+						return;
+					}
+
+					const targetDir = normalizeDirectoryPath(toPath);
+					addDirectories(ancestorDirectories(targetDir));
+					const prefix = sourceDir === '/' ? '/' : `${sourceDir}/`;
+					pipe(
+						Arr.fromIterable(directories),
+						Arr.filter(
+							(directoryPath) =>
+								directoryPath === sourceDir ||
+								directoryPath.startsWith(prefix)
+						),
+						Arr.map((directoryPath) => {
+							const relativePath =
+								directoryPath === sourceDir
+									? ''
+									: directoryPath.slice(prefix.length);
+							return relativePath.length === 0
+								? targetDir
+								: `${targetDir}/${relativePath}`;
+						}),
+						addDirectories
+					);
+					pipe(
+						Arr.fromIterable(fileMap.entries()),
+						Arr.filter(([filePath]) => filePath.startsWith(prefix)),
+						Arr.forEach(([filePath, content]) => {
+							fileMap.set(`${targetDir}/${filePath.slice(prefix.length)}`, content);
+						})
+					);
+				});
+			},
 			exists: (path: string) => {
 				const failure = failIfRequested('exists', path);
 				return Option.isSome(failure)

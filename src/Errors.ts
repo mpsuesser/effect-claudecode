@@ -32,7 +32,9 @@ export class HookStdinReadError extends Schema.TaggedErrorClass<HookStdinReadErr
  * Raised when decoding hook input fails. The `phase` field distinguishes
  * JSON parse failure (`'json'`) from schema validation failure (`'schema'`).
  *
- * Exit-code mapping: 2 (blocking) — Claude Code halts the pending action.
+ * Exit-code mapping: 2. Claude Code interprets exit 2 per event: it
+ * blocks/denies some gate events and is feedback-only or ignored for
+ * several observability events.
  *
  * @category Hook errors
  * @since 0.1.0

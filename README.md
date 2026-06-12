@@ -189,7 +189,7 @@ const plugin = Plugin.define({
   ],
   hooksConfig: {
     PostToolUse: [{
-      hooks: [{ type: 'command', command: 'bun ${CLAUDE_PLUGIN_ROOT}/hooks/loop-detector.ts' }]
+      hooks: [{ type: 'command', command: 'bun "${CLAUDE_PLUGIN_ROOT}"/hooks/loop-detector.ts' }]
     }]
   },
   mcpConfig: {
@@ -293,11 +293,11 @@ For non-hook programs, `ClaudeRuntime.default()` is the minimal preset providing
 ### Hook runner & events
 
 - **`Hook.runMain(hook)`** — drop-in runner that reads stdin, decodes the schema, builds a `HookContext`, runs your handler, encodes the output, and exits with the right code
-- **26 event schemas** — permission gates, prompt gates, lifecycle events, subagent events, elicitations, worktree events, and more
+- **30 event schemas** — permission gates, prompt gates, lifecycle events, subagent events, elicitations, worktree events, display events, and more
 - **Decision constructors** — `Hook.PreToolUse.deny('reason')`, `Hook.UserPromptSubmit.block('off-topic')`, `Hook.SessionStart.addContext('extra')`
 - **`HookContext` service** — `yield* Hook.sessionId`, `yield* Hook.cwd`, `yield* Hook.transcriptPath` inside any handler
 - **`Hook.dispatch({...})`** — handle multiple event types from a single binary
-- **Typed tool adapters** — `Hook.PreToolUse.onTool(...)` / `Hook.PostToolUse.onTool(...)` for `Bash` and `Read` payloads
+- **Typed tool adapters** — `Hook.PreToolUse.onTool(...)` / `Hook.PostToolUse.onTool(...)` for common tools including Bash, Read, Write, Edit, Glob, Grep, WebFetch, WebSearch, Agent, AskUserQuestion, and ExitPlanMode
 - **`HookBus`** — publish decoded hook events to a typed in-process `Stream`
 
 ### Plugin builder
@@ -310,12 +310,12 @@ For non-hook programs, `ClaudeRuntime.default()` is the minimal preset providing
 
 - **`ClaudeRuntime.default()` / `.project({ cwd })` / `.plugin({ cwd, pluginRoot })`** — prewired `ManagedRuntime` presets with `FileSystem`, `Path`, and optional cached `ClaudeProject` state
 - **`ClaudeProject.layer({ cwd })`** — cached project-scoped access to settings, `.mcp.json`, plugin directories, and named component lookups
-- **`Settings.load(cwd)`** — reads and merges user/project/local `settings.json` files into one typed `SettingsFile`
+- **`Settings.load(cwd)`** — reads and merges user, project, local, optional CLI overlay, and file-based managed `settings.json` scopes into one typed `SettingsFile`
 
 ### Parsing & config
 
 - **`Frontmatter.parseSkillFile(path)` and friends** — one-step typed markdown loaders for skills, commands, subagents, and output styles
-- **`Mcp.loadJson(path)`** — read `.mcp.json` into a discriminated `stdio` / `http` / `sse` union with typed authorization variants
+- **`Mcp.loadJson(path)`** — read `.mcp.json` into a discriminated `stdio` / `http` / `streamable-http` / `ws` / deprecated `sse` union with current `oauth` and header-helper fields
 
 ### Testing
 
@@ -335,7 +335,7 @@ For non-hook programs, `ClaudeRuntime.default()` is the minimal preset providing
 3. Builds a `HookContext.Service` layer from the decoded envelope
 4. Runs the handler with the context layer provided
 5. Encodes the returned `Output` value back to JSON and writes it to `Stdio.stdout`
-6. Exits the process with the right code (`0` success, `1` non-blocking error, `2` blocking decode error, `130` SIGINT)
+6. Exits the process with the right code (`0` success, `1` runner error, `2` input decode failure or handler-controlled event feedback, `130` SIGINT)
 
 The runner internally provides `NodeStdio.layer` from `@effect/platform-node-shared` and installs a custom `Runtime.Teardown` for exit-code mapping. You never call `process.exit`, manually decode stdin, or hand-roll stdout/exit handling yourself.
 
@@ -368,11 +368,11 @@ const hook = Hook.PreToolUse.onTool({
 Hook.runMain(hook);
 ```
 
-Currently the built-in typed adapters cover `Bash` and `Read`. The lower-level `Hook.Tool.decodePreToolUse(...)` / `decodePostToolUse(...)` helpers are also exported if you want the typed decoding without the `onTool(...)` wrapper.
+Currently the built-in typed adapters cover common tools such as `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `WebFetch`, `WebSearch`, `Agent`, `AskUserQuestion`, and `ExitPlanMode`. The lower-level `Hook.Tool.decodePreToolUse(...)` / `decodePostToolUse(...)` helpers are also exported if you want the typed decoding without the `onTool(...)` wrapper.
 
 ### Event definition
 
-Each of the 26 event namespaces exposes the same shape. Using `PreToolUse` as the template:
+Each of the 30 event namespaces exposes the same shape. Using `PreToolUse` as the template:
 
 ```ts
 import * as Effect from 'effect/Effect';
@@ -384,7 +384,8 @@ import { Hook } from 'effect-claudecode';
 //   tool_name, tool_input, tool_use_id
 //
 // Hook.PreToolUse.Output — universal + event-specific output fields:
-//   continue, stopReason, suppressOutput, systemMessage, hookSpecificOutput
+//   continue, stopReason, suppressOutput, systemMessage, terminalSequence,
+//   hookSpecificOutput
 //
 // Decision constructors:
 //   Hook.PreToolUse.allow(reason?)
@@ -434,23 +435,27 @@ Hook.runMain(hook);
 
 The accessors are `Effect<string, never, HookContext.Service>` — they simply pull a field out of the service. For direct access to the whole interface, yield `HookContext.Service` instead.
 
-### The 26 events
+### The 30 events
 
 | Event | Decision constructors | Notes |
 |---|---|---|
 | `PreToolUse` | `allow(reason?)`, `deny(reason)`, `ask(reason?)`, `defer(reason?)`, `allowWithUpdatedInput(input, reason?)` | Permission gate for tool calls |
-| `PostToolUse` | `passthrough()`, `block(reason)`, `addContext(text)`, `replaceMcpOutput(output, ctx?)` | Transform tool output |
+| `PostToolUse` | `passthrough()`, `block(reason)`, `addContext(text)`, `replaceOutput(output, ctx?)`, `replaceMcpOutput(output, ctx?)` | Transform tool output |
 | `UserPromptSubmit` | `allow()`, `block(reason)`, `addContext(text)`, `renameSession(title)` | Gate / augment user prompts |
-| `Notification` | `passthrough()`, `addContext(text)` | Observe notifications |
-| `Stop` | `allowStop()`, `block(reason)` | Gate end-of-turn |
-| `SubagentStop` | `allowStop()`, `block(reason)` | Gate subagent end-of-turn |
-| `SessionStart` | `passthrough()`, `addContext(text)` | Inject boot context |
+| `UserPromptExpansion` | `allow()`, `block(reason)`, `addContext(text)` | Gate / augment slash-command expansion |
+| `Notification` | `passthrough()`, `addContext(text)` | Observe notifications; `addContext` emits `systemMessage` |
+| `MessageDisplay` | `passthrough()`, `display(text)` | Transform display-only assistant text |
+| `Stop` | `allowStop()`, `block(reason)`, `addContext(text)` | Gate end-of-turn |
+| `SubagentStop` | `allowStop()`, `block(reason)`, `addContext(text)` | Gate subagent end-of-turn |
+| `SessionStart` | `passthrough()`, `addContext(text)`, `renameSession(title)`, `watchPaths(paths)`, `reloadSkills()` | Inject boot context |
 | `SessionEnd` | `passthrough()` | Side-effect only |
-| `PreCompact` | `passthrough()` | Side-effect only |
+| `PreCompact` | `passthrough()`, `block(reason)` | Gate compaction |
 | `PostCompact` | `passthrough()` | Side-effect only |
+| `Setup` | `passthrough()`, `addContext(text)` | Inject setup/maintenance context |
 | `PermissionRequest` | `allow(options?)`, `deny(message)` | Respond to permission UI |
 | `PermissionDenied` | `accept()`, `retry()` | Follow-up on denials |
 | `PostToolUseFailure` | `passthrough()`, `addContext(text)` | Augment tool failure telemetry |
+| `PostToolBatch` | `passthrough()`, `block(reason)`, `addContext(text)` | React to a parallel tool batch |
 | `InstructionsLoaded` | `passthrough()` | Observe instruction reload |
 | `StopFailure` | `passthrough()` | Observe failed stops |
 | `CwdChanged` | `passthrough()` | Observe working-dir changes |
@@ -459,7 +464,7 @@ The accessors are `Effect<string, never, HookContext.Service>` — they simply p
 | `SubagentStart` | `passthrough()`, `addContext(text)` | Inject subagent context |
 | `TaskCreated` | `allow()`, `block(reason)` | Gate task creation |
 | `TaskCompleted` | `allow()`, `block(reason)` | Gate task completion |
-| `TeammateIdle` | `allowIdle()` | Acknowledge idle state |
+| `TeammateIdle` | `allowIdle()`, `keepWorking(reason)`, `stopTeammate(reason)` | Acknowledge or prevent idle state |
 | `WorktreeCreate` | `created(worktreePath)` | Report created worktree |
 | `WorktreeRemove` | `passthrough()` | Observe worktree removal |
 | `Elicitation` | `accept(content)`, `decline()`, `cancel()` | Respond to elicitation |
@@ -491,17 +496,17 @@ Hook.dispatch({
 
 ### Matchers
 
-Claude Code matchers are regex strings. `Hook.matchTool` compiles one to a tester function (strings are anchored with `^(?:...)$`), and `Hook.testTool` is a one-shot equivalent:
+Claude Code matchers use match-all, exact/list, or regex semantics. `Hook.matchTool` mirrors those rules: `*` and `""` match all, plain token strings like `Bash|Read` are exact lists, and strings containing other characters are JavaScript regexes. `Hook.testTool` is a one-shot equivalent:
 
 ```ts
 import { Hook } from 'effect-claudecode';
 
-const isBash = Hook.matchTool('Bash'); // anchored: matches "Bash" exactly
-const isMcp = Hook.matchTool('mcp__.*'); // regex literal also accepted
-const isEditOrWrite = Hook.matchTool(/^(Edit|Write)$/);
+const isBash = Hook.matchTool('Bash'); // exact match
+const isMcp = Hook.matchTool('mcp__.*'); // regex fallback
+const isEditOrWrite = Hook.matchTool('Edit|Write'); // exact list
 
 isBash('Bash'); // true
-isBash('Bash(git)'); // false — anchored match
+isBash('Bash(git)'); // false — exact match
 Hook.testTool(/^Read$/, 'Read'); // true
 ```
 
@@ -534,7 +539,7 @@ Fails with `TranscriptReadError { path, cause }` on I/O failure.
 
 ## Settings
 
-`Settings.load(cwd)` reads the Claude Code settings files in priority order (user → project → local) and returns a merged `SettingsFile`:
+`Settings.load(cwd)` reads the implemented Claude Code settings scopes in priority order (user → project → local → optional CLI overlay → file-based managed settings) and returns a merged `SettingsFile`:
 
 ```ts
 import * as NodeFileSystem from '@effect/platform-node-shared/NodeFileSystem';
@@ -563,7 +568,7 @@ The loader requires `FileSystem`, `Path`, and `Config` services in its environme
 
 #### Exported schemas
 
-`Settings.SettingsFile`, `Settings.PermissionsConfig`, `Settings.PermissionMode`, `Settings.StatusLineConfig`, `Settings.ApiKeyHelperConfig`, `Settings.WorkingDirectoriesConfig`, `Settings.McpServerEntry`, `Settings.Marketplace`, `Settings.GithubMarketplace`, `Settings.DirectoryMarketplace`, `Settings.HooksSection`, `Settings.HookMatcherGroup`, `Settings.HookEntry`, `Settings.CommandHookEntry`, `Settings.HttpHookEntry`, `Settings.PromptHookEntry`, `Settings.AgentHookEntry`.
+`Settings.SettingsFile`, `Settings.PermissionsConfig`, `Settings.PermissionMode`, `Settings.SandboxConfig`, `Settings.StatusLineConfig`, `Settings.ApiKeyHelperConfig`, `Settings.AttributionConfig`, `Settings.McpServerEntry`, `Settings.Marketplace`, `Settings.GithubMarketplace`, `Settings.DirectoryMarketplace`, `Settings.HooksSection`, `Settings.HookMatcherGroup`, `Settings.HookEntry`, `Settings.CommandHookEntry`, `Settings.HttpHookEntry`, `Settings.McpToolHookEntry`, `Settings.PromptHookEntry`, and `Settings.AgentHookEntry`.
 
 ## Plugins
 
@@ -626,7 +631,7 @@ const plugin = Plugin.define({
 });
 ```
 
-All component arrays are optional. Use `Plugin.command(...)`, `Plugin.agent(...)`, `Plugin.skill(...)`, and `Plugin.outputStyle(...)` to author typed markdown components without hand-writing YAML frontmatter strings. `hooksConfig` is typed as `Settings.HooksSection`, and `mcpConfig` is typed as `Mcp.McpJsonFile`.
+All component arrays are optional. Use `Plugin.skill(...)` for new slash-command-like capabilities; `Plugin.command(...)` remains available for legacy `commands/` files. `Plugin.agent(...)` and `Plugin.outputStyle(...)` author the other markdown components without hand-writing YAML frontmatter strings. `hooksConfig` is typed as `Settings.HooksSection`, and `mcpConfig` is typed as `Mcp.McpJsonFile`.
 
 ### `Plugin.write`
 
@@ -658,7 +663,7 @@ Default directory layout produced when you do not override manifest or entry pat
 ```
 outputDir/
 ├── .claude-plugin/plugin.json
-├── commands/<name>.md
+├── commands/<name>.md             (legacy; prefer skills/ for new command-like entries)
 ├── agents/<name>.md
 ├── skills/<name>/SKILL.md
 ├── output-styles/<name>.md
@@ -695,7 +700,7 @@ await runtime.dispose();
 
 #### Exported schemas
 
-`Plugin.PluginManifest`, `Plugin.AuthorInfo`, `Plugin.UserConfigEntry`, `Plugin.UserConfigRecord`, `Plugin.ChannelSpec`, `Plugin.ComponentPathSpec`, `Plugin.HooksSpec`, `Plugin.ServerConfigSpec`, `Plugin.MarketplaceFile`, `Plugin.MarketplacePluginEntry`, `Plugin.MarketplacePluginSourceSpec`, `Plugin.GithubPluginSource`, `Plugin.DirectoryPluginSource`.
+`Plugin.PluginManifest`, `Plugin.AuthorInfo`, `Plugin.UserConfigEntry`, `Plugin.UserConfigRecord`, `Plugin.ChannelSpec`, `Plugin.ComponentPathSpec`, `Plugin.HooksSpec`, `Plugin.ServerConfigSpec`, `Plugin.MarketplaceFile`, `Plugin.MarketplacePluginEntry`, `Plugin.MarketplacePluginSourceSpec`, `Plugin.GithubPluginSource`, `Plugin.UrlPluginSource`, `Plugin.GitSubdirPluginSource`, `Plugin.NpmPluginSource`, and deprecated `Plugin.DirectoryPluginSource`.
 
 ## Frontmatter
 
@@ -713,7 +718,7 @@ await runtime.runPromise(
 	Effect.gen(function* () {
 		const skillPath = 'skills/effect-first/SKILL.md';
 		const parsed = yield* Frontmatter.parseSkillFile(skillPath);
-		yield* Console.log(parsed.frontmatter.name);
+		yield* Console.log(parsed.frontmatter?.name ?? '(directory name)');
 	})
 );
 
@@ -734,6 +739,8 @@ const markdown = Frontmatter.renderSkill(
 ```
 
 If the source has no `---` delimiters, `parseFile` returns `{ frontmatter: undefined, body: source }` (no error). Malformed YAML between valid delimiters fails with `FrontmatterParseError`. I/O failures surface as `FrontmatterReadError`. Typed helpers like `parseSkillFile` additionally surface schema mismatches as `FrontmatterDecodeError`.
+
+Markdown bodies are intentionally opaque pass-through strings. Claude Code resolves runtime substitutions such as `$ARGUMENTS`, `$ARGUMENTS[0]`, `$0`, named `$argument` values, `${CLAUDE_SESSION_ID}`, `${CLAUDE_EFFORT}`, `${CLAUDE_SKILL_DIR}`, `@file`, and `!\`command\`` when the skill or command is invoked; this library preserves the body text and does not parse that grammar.
 
 For in-memory sources use `Frontmatter.parse(source, path)` — same return type, no FileSystem requirement.
 
@@ -812,7 +819,7 @@ const program = Effect.scoped(
 				cwd: '/repo',
 				hook_event_name: 'FileChanged',
 				file_path: '/repo/a.ts',
-				change_type: 'modified'
+				event: 'change'
 			})
 		);
 		yield* bus.publish(
@@ -822,7 +829,7 @@ const program = Effect.scoped(
 				cwd: '/repo',
 				hook_event_name: 'FileChanged',
 				file_path: '/repo/b.ts',
-				change_type: 'modified'
+				event: 'change'
 			})
 		);
 
@@ -835,10 +842,10 @@ const program = Effect.scoped(
 
 | Schema | Purpose |
 |---|---|
-| `Frontmatter.SkillFrontmatter` | `SKILL.md` frontmatter — preserves kebab-case keys (`disable-model-invocation`, `user-invocable`, `allowed-tools`, `argument-hint`) |
-| `Frontmatter.SubagentFrontmatter` | `agents/*.md` frontmatter — full user + plugin fields, including optional `permissions`, `permissionMode`, and a nested `hooks` subtree |
-| `Frontmatter.CommandFrontmatter` | `commands/*.md` frontmatter |
-| `Frontmatter.OutputStyleFrontmatter` | `output-styles/*.md` frontmatter |
+| `Frontmatter.SkillFrontmatter` | `SKILL.md` frontmatter — permissive Claude Code schema, preserving kebab-case keys such as `disable-model-invocation`, `allowed-tools`, `disallowed-tools`, and `argument-hint` |
+| `Frontmatter.SubagentFrontmatter` | `agents/*.md` frontmatter — full user + plugin fields, including `permissionMode`, `mcpServers`, `hooks`, `color`, `initialPrompt`, and deprecated `permissions` |
+| `Frontmatter.CommandFrontmatter` | Legacy `commands/*.md` frontmatter; supports the same skill-style fields |
+| `Frontmatter.OutputStyleFrontmatter` | `output-styles/*.md` frontmatter, including plugin flags |
 
 ## MCP
 
@@ -865,19 +872,18 @@ Effect.runPromise(program.pipe(Effect.provide(NodeFileSystem.layer)));
 
 Fails with `McpConfigError { path, cause }` on read, parse, or decode failures.
 
-`Mcp.McpServerConfig` is a discriminated union of three transports:
+`Mcp.McpServerConfig` is a union of current transports plus decode-only legacy fields:
 
 | Transport | Class | Key fields |
 |---|---|---|
-| `"stdio"` | `Mcp.StdioMcpServer` | `command`, `args`, `env`, `cwd`, `timeout` |
-| `"http"` | `Mcp.HttpMcpServer` | `url`, `headers`, `allowedEnvVars`, `authorization`, `timeout` |
-| `"sse"` | `Mcp.SseMcpServer` | `url`, `headers`, `authorization`, `timeout` |
+| omitted / `"stdio"` | `Mcp.StdioMcpServer` | `command`, `args`, `env`, `timeout`, `alwaysLoad` |
+| `"http"` / `"streamable-http"` | `Mcp.HttpMcpServer` | `url`, `headers`, `headersHelper`, `oauth`, `timeout`, `alwaysLoad` |
+| `"ws"` | `Mcp.WsMcpServer` | `url`, `headers`, `headersHelper`, `timeout`, `alwaysLoad` |
+| `"sse"` | `Mcp.SseMcpServer` | deprecated transport; same remote fields as HTTP except `type` |
 
-HTTP and SSE servers may carry an `authorization` field of type `Mcp.McpAuthorization`, a union of:
+`timeout` is a per-server tool-execution timeout in milliseconds; Claude Code ignores values below `1000` and falls back to `MCP_TOOL_TIMEOUT`. String fields are passed through opaquely so Claude Code can expand `${VAR}` / `${VAR:-default}` placeholders.
 
-- `Mcp.OAuth2Authorization` — `clientId`, `tokenUrl`, `scopes`
-- `Mcp.ApiKeyAuthorization` — `key`, `header`
-- `Mcp.BearerAuthorization` — `token`
+Legacy `authorization`, stdio `cwd`, and HTTP `allowedEnvVars` remain decodable for source compatibility, but `Mcp.toClaudeCodeJson` omits them when emitting current Claude Code config. Use `oauth` for OAuth and `headers` / `headersHelper` for bearer or API-key style authentication.
 
 ## Errors
 
@@ -897,7 +903,7 @@ import {
 | Error | Payload | Origin | Exit code |
 |---|---|---|---|
 | `HookStdinReadError` | `{ cause }` | Runner | 1 |
-| `HookInputDecodeError` | `{ cause, phase: 'json' \| 'schema' }` | Runner | **2** (blocking) |
+| `HookInputDecodeError` | `{ cause, phase: 'json' \| 'schema' }` | Runner | 2 (Claude Code behavior is event-specific) |
 | `HookHandlerError` | `{ cause }` | Runner | 1 |
 | `HookOutputEncodeError` | `{ cause }` | Runner | 1 |
 | `HookStdoutWriteError` | `{ cause }` | Runner | 1 |
@@ -921,10 +927,10 @@ The runner maps the final `Exit<Output, RunnerError>` to a process exit code via
 |---|---|
 | `0` | Success — handler produced an `Output`, it was encoded and written to stdout |
 | `1` | Non-blocking error — stdin read, handler failure, encode error, or stdout write failure |
-| `2` | **Blocking** error — schema decode failed (tells Claude Code to halt the pending action) |
+| `2` | Input decode failure, or a handler-authored controlled exit for events whose contract uses exit 2; Claude Code interprets this per event (block/deny for gate events, feedback-only or ignored for several observability events) |
 | `130` | SIGINT / fiber interruption |
 
-Handler-authored *blocks* (e.g. `Hook.UserPromptSubmit.block('reason')`) travel through the **Output channel**, not the error channel. They exit with `0` and let Claude Code act on the decision encoded in stdout. Exit `2` is reserved for situations where the library itself cannot produce a valid output — i.e. the input couldn't be decoded.
+Most handler-authored *blocks* (e.g. `Hook.UserPromptSubmit.block('reason')`) travel through the **Output channel**. A few Claude Code contracts require process-level feedback instead — for example `TaskCreated.block(...)`, `TaskCompleted.block(...)`, and `TeammateIdle.keepWorking(...)` use exit `2` with stderr. Input decode failures also exit `2` because the library cannot produce a valid output.
 
 ## Testing
 
@@ -992,7 +998,7 @@ Testing.fixtures.SessionStart({ source: 'resume', model: 'claude-opus-4-6' });
 Testing.fixtures.CwdChanged(); // no overrides needed — envelope fields have defaults
 ```
 
-Fixtures exist for all 26 events. The return type is always `string` — a JSON blob you feed into `runHookWithMockStdin` or decode directly for schema round-trip tests.
+Fixtures exist for all 30 events. The return type is always `string` — a JSON blob you feed into `runHookWithMockStdin` or decode directly for schema round-trip tests.
 
 ### Assertion helpers
 

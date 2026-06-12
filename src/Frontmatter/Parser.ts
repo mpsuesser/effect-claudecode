@@ -16,8 +16,11 @@
  * This module exposes `parse(source)` for raw strings and
  * `parseFile(path)` for reading from disk. Both return the raw
  * `frontmatter` (as `unknown` — YAML-decoded but not schema-checked)
- * plus the markdown `body`. Schema validation happens in the
- * per-file-type modules (`Skill.ts`, `Subagent.ts`, etc.).
+ * plus the markdown `body`. The body is intentionally opaque: Claude
+ * Code resolves `$ARGUMENTS`, named arguments, `${CLAUDE_*}` variables,
+ * `@file`, and shell-substitution forms at invocation time. Schema
+ * validation happens in the per-file-type modules (`Skill.ts`,
+ * `Subagent.ts`, etc.).
  *
  * @since 0.1.0
  */

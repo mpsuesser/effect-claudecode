@@ -4,16 +4,19 @@
 
 **Method:** 9 surfaces audited. Per surface: one agent inventoried what the library encodes (source + test fixtures), one researched the current official docs/changelog, one cross-checked the two inventories. Every finding was then adversarially verified — the 45 highest-impact ones by independent docs-lens and code-lens verifier pairs (including empirical decode tests against effect@4.0.0-beta.46 and end-to-end runs of Hook.runMain under bun), the rest by per-surface batch verifiers with live doc fetches. 139 raw findings → 104 confirmed unique findings, 33 cross-surface duplicates merged, 2 refuted (one additional refutation was itself overturned by a direct doc fetch — see the suppressOriginalPrompt finding).
 
-**Current verdict: the library is still NOT fully aligned with Claude Code.** The original P0 hook/plugin/frontmatter/settings drift is mostly closed, and effective MCP scope loading is now implemented. Remaining drift is concentrated in plugin layout/emission fidelity, FileChanged matcher semantics, residual stale comments/examples, and missing focused tests for newly modeled surface.
+**Current verdict: the library is materially aligned with the audited Claude Code surfaces.** The original P0/P1 hook/plugin/frontmatter/settings/MCP drift is closed in current source, and the subsequent P2/P3 polish pass added focused tests, README/examples cleanup, explicit frontmatter permissiveness docs, and MCP compatibility-field decisions. Remaining risk is future Claude Code drift and intentionally out-of-scope platform/policy behavior, not a known active implementation backlog.
 
 ## Current implementation status — 2026-06-12
 
-**Code baseline assessed:** `752af9b feat(mcp): load effective server scopes`.
+**Code baseline originally assessed:** `752af9b feat(mcp): load effective server scopes`.
 That slice added effective MCP loading across plugin, user, project, local, and
 managed scopes, plus reserved-name and legacy-authorization emission handling.
+The 2026-06-12 truthfulness pass below additionally checked the current working
+tree after the plugin layout/emission changes. The final polish pass completed
+the listed remaining real work.
 
 **Validation:** `bun run typecheck && bun run test` is green on the assessed
-baseline. Latest run: `21` test files, `213` tests.
+baseline. Latest run after the final polish pass: `23` test files, `233` tests.
 
 **Live docs rechecked during status review:** raw markdown for hooks,
 plugins-reference, settings, and MCP from `https://code.claude.com/docs/en/*.md`.
@@ -21,27 +24,27 @@ The live hooks docs currently state that `FileChanged` uses `event` with values
 `change | add | unlink`; the older refutation at the bottom of this audit is
 therefore obsolete.
 
-**Current verdict:** the library is still not completely aligned with current
-Claude Code, but the highest-risk P0 hook/plugin/frontmatter/settings/MCP drift
-is largely closed. The remaining alignment work is concentrated in plugin
-layout/emission fidelity, a few matcher/comment/test residuals, and
-docs/examples cleanup.
+**Current verdict:** no confirmed open P0/P1 implementation-alignment gaps
+remain in current source. The focused P2/P3 work identified in the truthfulness
+pass has also been completed: tests now cover the newly modeled surfaces,
+README/examples/comments are updated, permissive frontmatter constraints are
+documented, and MCP legacy compatibility fields are decode-only on emission.
 
 ### Current status by surface
 
 | Surface | Status | Notes |
 |---|---:|---|
-| Hook event input/output schemas | Mostly done | All 30 current events are modeled. Most P0/P1 field renames and output additions are implemented. |
-| Hook runner and testing harness | Mostly done | Handler-controlled raw stdout/stderr and exit-code paths are implemented; `runHookWithMockStdin` preserves raw stdout. Some comments/JSDoc still overstate old semantics. |
-| Tool adapters | Mostly done | Current Bash/Read shapes and common built-in tools are modeled. Coverage can still expand for less-common tools. |
-| Matcher semantics | Partial | Standard matcher semantics are mostly implemented. `FileChanged` needs a targeted recheck: docs say literal filenames build the watch list, but filtering uses standard matcher rules against the basename. |
-| Settings schema and loader | Partial but much improved | CLI `--settings`, file-based managed settings, raw retention, and field-aware merges are implemented. Plist/registry/server-managed tiers are not. Full settings-key coverage is not guaranteed. |
-| Settings hooks section | Mostly done | Per-handler `if`, `args`, `asyncRewake`, common handler fields, and `mcp_tool` are modeled. HTTP `allowedEnvVars` is current and should remain. |
-| MCP schema | Mostly done | `stdio` without `type`, `ws`, `streamable-http`, `oauth`, `headersHelper`, and `alwaysLoad` are modeled. Legacy `authorization` remains decodable for compatibility but is omitted from emitted current config. |
-| MCP scope loading | Mostly done | Effective loading now covers plugin, user, project, local, and `managed-mcp.json` scopes with documented precedence; `workspace` servers are skipped from loaders/emission. |
-| Plugin manifest/marketplace/frontmatter | Mostly done | Current manifest/userConfig/marketplace/frontmatter P0/P1 schema drift is mostly fixed. |
-| Plugin layout and emission | Partial/open | `themes/`, `monitors/`, `bin/`, plugin-root `settings.json`, `.lsp.json` fallback, `./` path normalization, and skill-path de-dupe still need work. |
-| README/examples/docs comments | Open | Several examples still use unquoted `${CLAUDE_PLUGIN_ROOT}`; some docs comments are stale. |
+| Hook event input/output schemas | Done for audited surface | All 30 current events are modeled; focused tests cover the four newly modeled events. |
+| Hook runner and testing harness | Done for audited surface | Handler-controlled raw stdout/stderr and exit-code paths are implemented; `runHookWithMockStdin` preserves raw stdout; exit-code prose is now event-specific. |
+| Tool adapters | Mostly done | Current Bash/Read shapes and common built-in tools are modeled. Coverage can still expand for less-common/future tools. |
+| Matcher semantics | Done | Standard match-all/exact-list/regex semantics are implemented; `FileChanged` uses literal basename matching and focused tests cover regex-looking filenames. |
+| Settings schema and loader | Partial by design | CLI `--settings`, file-based managed settings, raw retention, field-aware merges, and major current keys are implemented. Plist/registry/server-managed tiers remain out of scope. |
+| Settings hooks section | Done for audited surface | Per-handler `if`, `args`, `asyncRewake`, common handler fields, HTTP `allowedEnvVars`, and `mcp_tool` are modeled and tested. |
+| MCP schema | Done for audited surface | `stdio` without `type`, `ws`, `streamable-http`, `oauth`, `headersHelper`, `alwaysLoad`, and timeout docs are modeled. Legacy `authorization`, stdio `cwd`, and HTTP `allowedEnvVars` are decode-only for current emission. |
+| MCP scope loading | Done for audited surface | Effective loading covers plugin, user, project, local, and `managed-mcp.json` scopes with documented precedence; `workspace` servers are skipped from loaders/emission. |
+| Plugin manifest/marketplace/frontmatter | Done for audited surface | Current manifest/userConfig/marketplace/frontmatter P0/P1 schema drift is fixed and focused marketplace/frontmatter tests were added. |
+| Plugin layout and emission | Done for audited surface | Scan discovers `themes/`, `monitors/`, `bin/`, plugin-root `settings.json`, and `.lsp.json`; load→write preserves loaded static layout files, normalizes non-default manifest paths with `./`, omits defaults, and de-dupes skill paths. First-class authoring APIs for these static components remain out of scope. |
+| README/examples/docs comments | Done | `${CLAUDE_PLUGIN_ROOT}` examples are quoted; README/source comments are updated for 30 events, matcher semantics, tool adapters, exit-code behavior, frontmatter body pass-through, and MCP current/legacy fields. |
 
 ### Completed since the original audit
 
@@ -77,6 +80,9 @@ docs/examples cleanup.
   Grep, WebFetch, WebSearch, Agent, AskUserQuestion, and ExitPlanMode.
 - `Testing.fixtures` stale defaults were corrected, and
   `runHookWithMockStdin` no longer assumes stdout is always JSON.
+- Focused tests now cover `Setup`, `UserPromptExpansion`, `PostToolBatch`,
+  `MessageDisplay`, and matcher edge cases including FileChanged literal
+  basenames that look like regexes.
 
 #### Settings and hook configuration
 
@@ -96,7 +102,7 @@ docs/examples cleanup.
 - `statusLine.refreshInterval` is modeled and the undocumented `disabled`
   status-line type was removed.
 - Hook handler config now models per-handler `if`, `args`, `asyncRewake`,
-  `statusMessage`, `once`, and `mcp_tool`.
+  `statusMessage`, `once`, and `mcp_tool`, with focused settings-loader tests.
 - Live docs confirm per-HTTP-hook `allowedEnvVars` and top-level
   `httpHookAllowedEnvVars` are current, so those fields should remain.
 
@@ -120,7 +126,20 @@ docs/examples cleanup.
   `keep-coding-instructions` / `force-for-plugin`, subagent `mcpServers`,
   `color`, and `initialPrompt`.
 - Root-level `SKILL.md` discovery is implemented.
-- `commands/` is documented in source as the legacy skill-style command form.
+- Plugin scan now discovers default `.lsp.json`, `themes/`,
+  `monitors/monitors.json`, `bin/`, and plugin-root `settings.json` surfaces.
+- Loaded plugins preserve static layout files on write, including `.lsp.json`,
+  themes, monitors, bin executables, and root settings.
+- Plugin manifest emission normalizes explicit non-default path specs with `./`,
+  omits default component/config paths, and de-dupes additive skill paths.
+- `commands/` is documented in source and README as the legacy skill-style
+  command form.
+- Skill/subagent permissiveness is documented explicitly: Claude Code runtime
+  compatibility stays broad, while stricter name/description/memory constraints
+  belong in lint/validation layers when desired.
+- Frontmatter bodies are documented as opaque pass-through strings; Claude Code
+  resolves `$ARGUMENTS`, named args, `${CLAUDE_*}` vars, `@file`, and shell
+  substitutions at invocation time.
 
 #### MCP
 
@@ -134,61 +153,92 @@ docs/examples cleanup.
 - Current MCP emission omits legacy `authorization` blocks in favor of `oauth`
   plus `headers` / `headersHelper`; the legacy field remains decodable only for
   source compatibility.
+- Stdio `cwd` and HTTP `allowedEnvVars` are also decode-only compatibility
+  fields and are omitted by `toClaudeCodeJson`.
+- MCP `timeout` is documented as milliseconds, with sub-1000 values ignored by
+  Claude Code, and tests use realistic timeout fixtures.
 
 ### Remaining work
 
 #### P0 / P1 — finish alignment
 
-- **Plugin layout components are still partial/open.** Scan/write/preserve
-  `themes/`, `monitors/`, `bin/`, and plugin-root `settings.json`.
-- **LSP fallback is still partial.** `lspServers` is preserved, but default
-  `.lsp.json` discovery/loading is not complete.
-- **Plugin manifest emitted paths are still stale.** Defaults still emit bare
-  strings in some paths; either omit default component fields or emit documented
-  `./`-prefixed relative paths.
-- **Skill path de-duplication remains open.** Default `skills/` and declared
-  skill paths are now additive, but duplicates should be normalized away.
-- **FileChanged matcher semantics need a targeted fix/test.** Current docs say
-  literal segments build the watch list, but standard matcher rules filter the
-  changed basename. Current helper behavior appears too literal for filtering.
+- No confirmed open P0/P1 implementation-alignment gaps remain. Historical
+  P0/P1 findings remain below for context, but many are now fixed and must not
+  be treated as an active task list without rechecking source.
 
 #### P2 / P3 — polish and coverage
 
-- Add stronger dedicated tests for the four newly modeled hook events and for
-  newly added settings/hook-entry fields (`mcp_tool`, per-handler `if`, `args`,
-  `asyncRewake`, raw settings retention, sandbox, marketplace variants, etc.).
-- Tighten or document deliberate openness for skill/subagent constraints:
-  skill name/description spec constraints, subagent name pattern, and subagent
-  `memory` enum.
-- Keep body substitution parsing explicitly out of scope or document the current
-  opaque pass-through behavior more clearly.
-- Update README/examples to quote `${CLAUDE_PLUGIN_ROOT}` in shell-form hook
-  commands.
-- Clean stale source comments/JSDoc, especially runner exit-code summaries,
-  `Errors.ts` decode-failure wording, and PostToolUse replacement helper docs.
+- Completed in the final polish pass: focused tests were added for newly modeled
+  hook events, matcher helpers, settings/hook-entry fields, marketplace variants,
+  and frontmatter variants; README/examples/source comments were cleaned up;
+  skill/subagent permissiveness and body substitution pass-through are
+  documented; MCP `cwd`/`allowedEnvVars` are decode-only on emission; and MCP
+  timeout units/thresholds are documented/tested.
+- Remaining future work is maintenance: rerun this audit against new Claude Code
+  releases, expand typed adapters for any newly documented tools, and consider
+  opt-in strict lint rules if callers want Agent Skills/subagent conformance
+  beyond Claude Code's tolerant runtime behavior.
+
+### Truthfulness pass — current working tree, 2026-06-12
+
+This pass reread the entire audit and checked the current source for every
+remaining "not done" claim. The detailed historical backlog below is still
+valuable context, but it is no longer an authoritative task list.
+
+**Claims that were still described as open but are now implemented:**
+
+- `FileChanged` matcher behavior: `src/Hook/Matcher.ts` now implements
+  match-all (`*`/empty), exact/pipe-list, regex fallback, and
+  `matchFileName` literal basename matching; `src/Hook/Events/FileChanged.ts`
+  uses `matchFileName(fileBasename(input.file_path))`.
+- Plugin layout/emission fidelity: `Plugin.scan` discovers `.lsp.json`,
+  `themes/`, `monitors/monitors.json`, `bin/`, and plugin-root
+  `settings.json`; `Plugin.write` preserves loaded static layout files;
+  `Plugin.sync` omits default paths, normalizes explicit non-default paths with
+  `./`, and skill path discovery is de-duped.
+- The historical P0/P1 schema findings for PermissionRequest, SessionEnd,
+  StopFailure, Notification, ConfigChange, WorktreeCreate, TeammateIdle,
+  hook handler config (`if`, `args`, `asyncRewake`, `mcp_tool`), settings
+  precedence/raw retention, MCP scopes/transports/oauth/headersHelper,
+  plugin manifest/marketplace fields, root `SKILL.md`, and most frontmatter
+  fields are implemented in current source.
+- The four previously missing hook events (`Setup`, `UserPromptExpansion`,
+  `PostToolBatch`, `MessageDisplay`) exist, are exported, and now have stronger
+  event-specific tests.
+
+**Claims from the truthfulness pass that are now resolved:**
+
+- Focused tests now cover the newly modeled hook events, matcher helper edge
+  cases, recently added settings/hook-entry fields, marketplace variants, and
+  frontmatter variants.
+- Skill/subagent strict constraints remain intentionally permissive for Claude
+  Code runtime compatibility and are documented as such; stricter conformance is
+  left to lint/validation layers where paths and policy are available.
+- Frontmatter bodies remain opaque pass-through strings, and README/source docs
+  now explicitly call out Claude Code-owned substitution grammar.
+- README/examples quote `${CLAUDE_PLUGIN_ROOT}` in shell-form hook commands.
+- README/source prose now says 30 events, lists current typed adapters, and
+  describes exit-2 behavior as event-specific rather than uniformly blocking.
+- MCP `cwd` and HTTP `allowedEnvVars` are decode-only compatibility fields and
+  are omitted by `toClaudeCodeJson`.
+- MCP timeout units/ignored-below-1000 behavior are documented, and tests use a
+  realistic timeout value.
 
 ### Immediate next steps
 
-1. Start from the clean code baseline `752af9b` and rerun:
-
-   ```sh
-   bun run typecheck && bun run test
-   ```
-
-2. Work the remaining open items in this order:
-
-   1. Plugin layout/emission fidelity.
-   2. FileChanged matcher behavior and residual hook comments/tests.
-   3. README/examples and stricter optional validation/doc polish.
-
-3. Add fixture tests as each remaining contract is fixed.
-4. Keep this status section authoritative over the historical findings below;
-   the detailed finding list remains the original audit backlog and may still
-   contain stale “Library:” descriptions for items already fixed.
+1. Keep `bun run typecheck && bun run test` green before release.
+2. Treat the historical backlog below as provenance, not as an active task list;
+   recheck current source and live docs before reopening any item.
+3. For future Claude Code releases, add fixture tests with any schema changes
+   and update `Testing.fixtures` in the same change.
 
 ## Instructions for the fixing agent
 
-This document is the work order: each finding is a task, and the sections are ordered by priority.
+This document contains both the current status and the original historical
+backlog. Use the current status, remaining-work list, and truthfulness pass
+above as authoritative. Do not treat every detailed finding below as an open
+task without first rechecking current source; many historical findings are now
+fixed but retained for provenance.
 
 1. **Baseline first.** Run `bun run test && bun run typecheck` before changing anything and confirm green. The audit's empirical claims were validated against `effect@4.0.0-beta.46`; if the repo has since moved to a newer Effect beta, the contracts below are unchanged (they describe Claude Code's wire formats, not Effect's API), but adapt any `Schema.*` idioms in the fix suggestions to the current Effect API.
 2. **Work one priority tier at a time** (P0 → P1 → P2 → P3), module by module within a tier. Run `bun run test && bun run typecheck` after each module; commit at least once per tier.
@@ -196,9 +246,15 @@ This document is the work order: each finding is a task, and the sections are or
 4. **Ground truth is the cited doc page, not this file.** Where a finding carries an explicit caveat ("could not be fully evidenced", "confirm placement empirically"), fetch the cited URL before coding — appending `.md` to a docs path (e.g. `code.claude.com/docs/en/hooks.md`) returns raw markdown that is easy to grep. Resolve caveats from the live page; never guess.
 5. **Previously unmodeled events** (Setup, UserPromptExpansion, PostToolBatch, MessageDisplay) now have source modules. If touching them again, fetch the live hooks reference and add focused fixture tests for their complete input/output schemas.
 6. **Schema philosophy:** inputs stay open and tolerant — unknown fields ignored, prefer optional unless the docs mark a field required. A too-strict input schema is the worst failure mode in this audit: a decode failure exits 2, which on several events has destructive side effects (denies permissions, blocks config changes). Outputs emit only documented fields.
-7. **Scope:** the "Additional risks" section now lists active residual risks, not merely deferred feature work. The "Checked and refuted" section requires no changes unless new live-doc evidence contradicts it. If you intentionally skip a finding, say so in your summary instead of dropping it silently.
+7. **Scope:** the "Additional risks" section summarizes residual future-maintenance risks and intentionally thin areas. The "Checked and refuted" section requires no changes unless new live-doc evidence contradicts it. If you intentionally skip a future reopened finding, say so in your summary instead of dropping it silently.
 
-## P0 — Breaking: decode failures, wrong emissions, inverted semantics
+## Historical backlog — original findings, many now resolved
+
+The sections below preserve the original audit findings for traceability. They
+are intentionally not rewritten line-by-line after each fix. Prefer the current
+status and truthfulness pass above when deciding what to work on next.
+
+## Historical P0 — Breaking: decode failures, wrong emissions, inverted semantics
 
 ### Hook events
 
@@ -375,7 +431,7 @@ This document is the work order: each finding is a task, and the sections are or
   - Fix: Change `paths` to the existing StringOrStringArray union (Skill.ts:26-29), matching how `allowed-tools` is already modeled.
 
 
-## P1 — Missing: current capabilities the library cannot express or access
+## Historical P1 — Missing: current capabilities the library could not express or access
 
 ### Hook events
 
@@ -437,11 +493,11 @@ This document is the work order: each finding is a task, and the sections are or
   - Current: Since v2.1.142, a root-level SKILL.md with no skills/ directory and no skills manifest field auto-loads as a single-skill plugin (https://code.claude.com/docs/en/plugins-reference; https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md).
   - Fix: In scan's skill discovery, when no manifest skills spec exists and skills/ is absent, check for `<root>/SKILL.md` and load it as a single skill.
 
-- **Plugin layout components not modeled: themes/, monitors, bin/, plugin-root settings.json**  
-  `src/Plugin/Load.ts` · batch verified (high)
-  - Library: The library's layout covers only .claude-plugin/plugin.json, commands/, agents/, skills/, output-styles/, hooks/hooks.json, and .mcp.json (src/Plugin/Define.ts:12-22; src/Plugin/Layout.ts:14-19; src/Plugin/Load.ts:596-649). No code references themes, monitors, bin/, or a plugin-root settings.json.
-  - Current: Current plugin layout also includes themes/ (experimental color themes), monitors/monitors.json (background monitors, v2.1.105+; required fields name/command/description, optional when), bin/ (executables added to Bash tool PATH while the plugin is enabled), and a plugin-root settings.json (default settings; only `agent` and `subagentStatusLine` keys supported) (https://code.claude.com/docs/en/plugins-reference; https://code.claude.com/docs/en/plugins).
-  - Fix: Model these as additional optional plugin components in scan/load/write (at minimum, pass them through without destroying them), matching the current default-locations table.
+- **Resolved: plugin layout components not modeled: themes/, monitors, bin/, plugin-root settings.json**
+  `src/Plugin/Load.ts`, `src/Plugin/Define.ts` · batch verified (high)
+  - Original gap: the layout covered only .claude-plugin/plugin.json, commands/, agents/, skills/, output-styles/, hooks/hooks.json, and .mcp.json.
+  - Current spec: Current plugin layout also includes themes/ (experimental color themes), monitors/monitors.json (background monitors, v2.1.105+; required fields name/command/description, optional when), bin/ (executables added to Bash tool PATH while the plugin is enabled), and a plugin-root settings.json (default settings; only `agent` and `subagentStatusLine` keys supported) (https://code.claude.com/docs/en/plugins-reference; https://code.claude.com/docs/en/plugins).
+  - Implemented: scan discovers these default surfaces and load→write preserves loaded static layout files, including custom manifest path specs where present. First-class builder APIs for authoring those static components remain out of scope.
 
 ### Other
 
@@ -663,7 +719,7 @@ This document is the work order: each finding is a task, and the sections are or
   - Fix: Add `args: Schema.optional(Schema.Array(Schema.String))` to CommandHookEntry.
 
 
-## P2 — Outdated: works today but encodes stale shapes
+## Historical P2 — Outdated: worked at audit time but encoded stale shapes
 
 ### Hook events
 
@@ -701,17 +757,17 @@ This document is the work order: each finding is a task, and the sections are or
   - Current: The `skills` manifest field adds custom skill directories *in addition to* the default `skills/` directory, which is always scanned; only `commands`, `agents`, `outputStyles`, and `experimental.*` replace their defaults (https://code.claude.com/docs/en/plugins-reference).
   - Fix: In expandSkillPathSpec, always scan the default `skills/` directory and union it with the declared spec paths so Plugin.scan/load discover the same skill set current Claude Code loads.
 
-- **Emitted manifest path values lack the documented `./` prefix**  
+- **Resolved: emitted manifest path values lacked the documented `./` prefix**
   `src/Plugin/Layout.ts` · batch verified (high)
-  - Library: syncManifest/inferredManifest fill defaults as bare strings — 'commands', 'agents', 'skills', 'output-styles', 'hooks/hooks.json', '.mcp.json' (src/Plugin/Layout.ts:14-19, 48-52, 69-73; src/Plugin/Load.ts:427-439). Verified emitted plugin.json: `{"name": "probe", "commands": "commands", "hooks": "hooks/hooks.json"}`.
-  - Current: All manifest custom paths must be relative to the plugin root and start with `./`; absolute paths and `..` traversal are errors, and docs examples consistently use './commands/', './config/hooks.json', etc. (https://code.claude.com/docs/en/plugins-reference).
-  - Fix: Either omit the manifest fields entirely when components sit in their default locations (Claude Code auto-discovers them), or emit './'-prefixed values ('./commands/', './hooks/hooks.json', './.mcp.json') to match the documented path format.
+  - Original gap: syncManifest/inferredManifest filled defaults as bare strings — 'commands', 'agents', 'skills', 'output-styles', 'hooks/hooks.json', '.mcp.json'.
+  - Current spec: All manifest custom paths must be relative to the plugin root and start with `./`; absolute paths and `..` traversal are errors, and docs examples consistently use './commands/', './config/hooks.json', etc. (https://code.claude.com/docs/en/plugins-reference).
+  - Implemented: syncManifest omits default component/config path fields and normalizes explicit non-default string/array path specs with a leading `./`.
 
-- **Plugin.scan/load silently drops a declared `lspServers` manifest field and never discovers the default .lsp.json**  
+- **Resolved: Plugin.scan/load silently dropped a declared `lspServers` manifest field and never discovered the default .lsp.json**
   `src/Plugin/Load.ts` · batch verified (high)
-  - Library: inferredManifest's base copies name/version/description/author/homepage/repository/license/keywords/userConfig/channels from the source manifest but omits lspServers (src/Plugin/Load.ts:411-425), and load builds its definition from inferredManifest (Load.ts:726-736), so load → write rewrites plugin.json without a declared lspServers field. scan has no `.lsp.json` fallback (only hooks/hooks.json and .mcp.json, Load.ts:625, 648), despite the manifest schema accepting lspServers (src/Plugin/Manifest.ts:174).
-  - Current: `lspServers` is a current manifest field with default file location `.lsp.json` at the plugin root (config fields: command, extensionToLanguage required; args, transport, env, initializationOptions, settings, workspaceFolder, startupTimeout, maxRestarts, diagnostics optional) (https://code.claude.com/docs/en/plugins-reference).
-  - Fix: Carry lspServers through inferredManifest (and write), and add `.lsp.json` as a fallback config path in scan so LSP configuration survives round-trips.
+  - Original gap: inferredManifest omitted `lspServers`, and scan had no `.lsp.json` fallback despite the manifest schema accepting `lspServers`.
+  - Current spec: `lspServers` is a current manifest field with default file location `.lsp.json` at the plugin root (config fields: command, extensionToLanguage required; args, transport, env, initializationOptions, settings, workspaceFolder, startupTimeout, maxRestarts, diagnostics optional) (https://code.claude.com/docs/en/plugins-reference).
+  - Implemented: inferredManifest carries `lspServers`, scan discovers default `.lsp.json`, and loaded plugin write preserves the file.
 
 - **commands/ treated as a first-class primary component kind; current docs soft-deprecate it in favor of skills/**  
   `src/Plugin/Define.ts` · batch verified (high)
@@ -808,7 +864,7 @@ This document is the work order: each finding is a task, and the sections are or
   - Fix: Remove (or deprecate with a doc warning) the `permissions` property from SubagentFrontmatter so the library does not validate/emit a key current Claude Code ignores; update the Schemas.test.ts fixture.
 
 
-## P3 — Cosmetic
+## Historical P3 — Cosmetic
 
 ### Hook events
 
@@ -876,9 +932,9 @@ This document is the work order: each finding is a task, and the sections are or
 ## Additional risks (completeness critic)
 
 - **MCP policy/effective configuration needs follow-up verification.** Effective MCP server resolution now covers `~/.claude.json` local/user scopes, project `.mcp.json`, plugin configs, managed MCP, and reserved-name handling. Remaining MCP risk is mostly around deeper enterprise policy behavior and future Claude Code field additions.
-- **Plugin write/scan still trails current layout.** Root-level `SKILL.md` discovery is implemented, but `Plugin.write` and `Plugin.scan` still need full support for newer components such as `bin/`, plugin-root `settings.json`, `monitors/`, `themes/`, and `.lsp.json` fallback discovery.
-- **Examples and docs can still teach stale patterns.** README/examples still need cleanup for quoted `${CLAUDE_PLUGIN_ROOT}` paths and for steering new plugin authors toward `skills/` over legacy `commands/`.
-- **Test coverage lags modeled surface.** The implementation now models many current fields, but several newly added settings, hook-entry, and event schemas lack dedicated fixture tests.
+- **Plugin static-component authoring remains intentionally thin.** Scan/load/write now preserve current static layout surfaces (`.lsp.json`, `themes/`, `monitors/`, `bin/`, plugin-root `settings.json`), but there are no ergonomic builder APIs for creating those files from typed in-memory entries.
+- **Examples and docs need ongoing drift checks.** The known README/examples cleanup from this pass is complete; future Claude Code releases may still require prose updates.
+- **Coverage should track future surface growth.** Focused tests now cover the newly modeled settings, hook-entry, hook-event, marketplace, and frontmatter surfaces from this audit; add fixtures alongside future schema changes.
 
 ## Checked and refuted — library is correct, no change needed
 
@@ -886,7 +942,7 @@ This document is the work order: each finding is a task, and the sections are or
 
 ## Superseded refutations
 
-- **FileChanged input shape.** The earlier refutation that claimed FileChanged still used `change_type: created|modified|deleted` is obsolete. Live `https://code.claude.com/docs/en/hooks.md` fetched during the current status review documents `file_path` plus `event: "change" | "add" | "unlink"`. The current source follows that shape. Remaining work is matcher semantics, not input shape.
+- **FileChanged input shape.** The earlier refutation that claimed FileChanged still used `change_type: created|modified|deleted` is obsolete. Live `https://code.claude.com/docs/en/hooks.md` fetched during the current status review documents `file_path` plus `event: "change" | "add" | "unlink"`. The current source follows that shape, and matcher semantics are now covered by focused tests.
 
 ## Coverage
 

@@ -136,7 +136,7 @@ const plugin = Plugin.define({
 					{
 						type: 'command',
 						command:
-							'bun ${CLAUDE_PLUGIN_ROOT}/hooks/loop-detector.ts'
+							'bun "${CLAUDE_PLUGIN_ROOT}"/hooks/loop-detector.ts'
 					}
 				]
 			}

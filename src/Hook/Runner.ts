@@ -348,8 +348,9 @@ export const runDispatchProgram = (
  * - `0` success
  * - handler-authored `HookProcessOutput` exits use their requested code
  * - `2` for `HookInputDecodeError` (Claude Code interprets exit 2 per
- *   event: blocking for PreToolUse, PermissionRequest, ConfigChange, etc.;
- *   feedback-only or ignored for several observability events)
+ *   event: blocking/denying for gate events such as PreToolUse,
+ *   PermissionRequest, and ConfigChange; feedback-only or ignored for
+ *   several observability events)
  * - `1` non-blocking runner error (stdin read, handler crash, encode, write)
  * - `130` fiber interruption (SIGINT-style)
  *

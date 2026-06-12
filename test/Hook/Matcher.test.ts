@@ -59,4 +59,17 @@ describe('Hook.matchFileName', () => {
 		expect(matches('.env')).toBe(true);
 		expect(matches('xenvrc')).toBe(false);
 	});
+
+	test('does not interpret string filename segments as regexes', () => {
+		const matches = matchFileName('config.*|[secret].env');
+		expect(matches('config.*')).toBe(true);
+		expect(matches('[secret].env')).toBe(true);
+		expect(matches('config.json')).toBe(false);
+		expect(matches('s.env')).toBe(false);
+	});
+
+	test('star and empty string still match every basename', () => {
+		expect(matchFileName('*')('anything.ts')).toBe(true);
+		expect(matchFileName('')('.env')).toBe(true);
+	});
 });

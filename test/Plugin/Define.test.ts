@@ -16,6 +16,7 @@ import * as Option from 'effect/Option';
 
 import { PluginWriteError } from '../../src/Errors.ts';
 import * as Define from '../../src/Plugin/Define.ts';
+import * as Load from '../../src/Plugin/Load.ts';
 import { McpJsonFile } from '../../src/Mcp/JsonFile.ts';
 import { PluginManifest } from '../../src/Plugin/Manifest.ts';
 import * as Testing from '../../src/Testing.ts';
@@ -359,6 +360,41 @@ describe('Plugin.write — directory layout', () => {
 			expect(snapshot.directories).not.toContain('/dest/output-styles');
 			expect(snapshot.directories).not.toContain('/dest/hooks');
 			expect(snapshot.files.has('/dest/.mcp.json')).toBe(false);
+		})
+	);
+
+	it.effect('preserves loaded static layout files when writing elsewhere', () =>
+		Effect.gen(function* () {
+			const fileSystem = Testing.makeMockFileSystem({
+				'/src/.claude-plugin/plugin.json': '{"name":"static-plugin"}',
+				'/src/.lsp.json': '{"go":{"command":"gopls","extensionToLanguage":{".go":"go"}}}',
+				'/src/themes/dark.json': '{"name":"dark"}',
+				'/src/monitors/monitors.json': '{"monitors":[]}',
+				'/src/bin/helper': '#!/usr/bin/env bash\n',
+				'/src/settings.json': '{}'
+			});
+			const loaded = yield* Load.load('/src').pipe(
+				Effect.provide(fileSystem.layer)
+			);
+
+			yield* Define.write(loaded, '/dest').pipe(
+				Effect.provide(fileSystem.layer)
+			);
+
+			const snapshot = fileSystem.snapshot();
+			expect(snapshot.files.get('/dest/.lsp.json')).toBe(
+				'{"go":{"command":"gopls","extensionToLanguage":{".go":"go"}}}'
+			);
+			expect(snapshot.files.get('/dest/themes/dark.json')).toBe(
+				'{"name":"dark"}'
+			);
+			expect(snapshot.files.get('/dest/monitors/monitors.json')).toBe(
+				'{"monitors":[]}'
+			);
+			expect(snapshot.files.get('/dest/bin/helper')).toBe(
+				'#!/usr/bin/env bash\n'
+			);
+			expect(snapshot.files.get('/dest/settings.json')).toBe('{}');
 		})
 	);
 });
