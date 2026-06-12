@@ -47,7 +47,11 @@ import {
 	SkillFrontmatter,
 	SubagentFrontmatter
 } from '../Frontmatter.ts';
-import { McpJsonFile, type McpJsonFileInput } from '../Mcp.ts';
+import {
+	McpJsonFile,
+	toClaudeCodeJson,
+	type McpJsonFileInput
+} from '../Mcp.ts';
 import { HooksSection } from '../Settings/HooksSection.ts';
 import {
 	isJsonFilePath,
@@ -640,6 +644,28 @@ const toJsonFileContent = (value: unknown): string =>
 	// printer that preserves 2-space indent.
 	`${JSON.stringify(value, null, 2)}\n`;
 
+/** @internal */
+const manifestForWrite = (manifest: PluginManifest): PluginManifest =>
+	Option.match(Option.fromNullishOr(manifest.mcpServers), {
+		onNone: () => manifest,
+		onSome: (mcpServers) => {
+			if (typeof mcpServers === 'string' || Array.isArray(mcpServers)) {
+				return manifest;
+			}
+			return Option.match(
+				Schema.decodeUnknownOption(McpJsonFile)({ mcpServers }),
+				{
+					onNone: () => manifest,
+					onSome: (file) =>
+						new PluginManifest({
+							...manifest,
+							mcpServers: toClaudeCodeJson(file).mcpServers
+						})
+				}
+			);
+		}
+	});
+
 // ---------------------------------------------------------------------------
 // write
 // ---------------------------------------------------------------------------
@@ -692,13 +718,14 @@ export const write = (
 	Effect.gen(function* () {
 		const path = yield* Path.Path;
 		const manifest = syncManifest(definition);
+		const emittedManifest = manifestForWrite(manifest);
 
 		// .claude-plugin/plugin.json
 		const claudePluginDir = path.join(destDir, '.claude-plugin');
 		yield* makeDir(claudePluginDir);
 		yield* writeFile(
 			path.join(claudePluginDir, 'plugin.json'),
-			toJsonFileContent(manifest)
+			toJsonFileContent(emittedManifest)
 		);
 
 		// commands/<name>.md
@@ -762,7 +789,7 @@ export const write = (
 			if (Option.isSome(mcpPath)) {
 				yield* writeFile(
 					path.join(destDir, mcpPath.value),
-					toJsonFileContent(definition.mcpConfig.value)
+					toJsonFileContent(toClaudeCodeJson(definition.mcpConfig.value))
 				);
 			}
 		}

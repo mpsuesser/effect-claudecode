@@ -316,6 +316,36 @@ describe('Plugin.write — directory layout', () => {
 		})
 	);
 
+	it.effect('omits legacy authorization from emitted .mcp.json', () =>
+		Effect.gen(function* () {
+			const def = Define.define({
+				manifest: { name: 'p' },
+				mcpConfig: {
+					mcpServers: {
+						api: {
+							type: 'http',
+							url: 'https://api.example.com/mcp',
+							oauth: { scopes: 'read write' },
+							authorization: {
+								type: 'bearer',
+								token: 'legacy-token'
+							}
+						},
+						workspace: { command: 'reserved' }
+					}
+				}
+			});
+			const fileSystem = yield* Testing.writePluginToMemory(def, '/dest');
+			const snapshot = fileSystem.snapshot();
+			const mcpContent = snapshot.files.get('/dest/.mcp.json');
+
+			expect(mcpContent).toBeDefined();
+			expect(mcpContent).toContain('"oauth"');
+			expect(mcpContent).not.toContain('"authorization"');
+			expect(mcpContent).not.toContain('"workspace"');
+		})
+	);
+
 	it.effect('skips empty component directories entirely', () =>
 		Effect.gen(function* () {
 			const def = Define.define({ manifest: { name: 'p' } });

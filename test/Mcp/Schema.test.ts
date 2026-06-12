@@ -14,6 +14,8 @@ import { describe, expect, it } from '@effect/vitest';
 import * as Effect from 'effect/Effect';
 import * as FileSystem from 'effect/FileSystem';
 import * as Layer from 'effect/Layer';
+import * as Option from 'effect/Option';
+import * as Path from 'effect/Path';
 import * as PlatformError from 'effect/PlatformError';
 import * as Schema from 'effect/Schema';
 
@@ -29,11 +31,18 @@ import {
 	StdioMcpServer,
 	WsMcpServer
 } from '../../src/Mcp/Schema.ts';
-import { McpJsonFile, loadJson } from '../../src/Mcp/JsonFile.ts';
+import {
+	McpJsonFile,
+	loadEffective,
+	loadJson,
+	loadManagedMcp,
+	toClaudeCodeJson
+} from '../../src/Mcp/JsonFile.ts';
 
 const decodeServer = Schema.decodeUnknownEffect(McpServerConfig);
 const decodeHttp = Schema.decodeUnknownEffect(HttpMcpServer);
 const decodeFile = Schema.decodeUnknownEffect(McpJsonFile);
+const toJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString);
 
 // ---------------------------------------------------------------------------
 // Test layer builder
@@ -52,6 +61,7 @@ const makeFileSystemLayer = (
 	files: ReadonlyMap<string, string>
 ): Layer.Layer<FileSystem.FileSystem> =>
 	FileSystem.layerNoop({
+		exists: (path: string) => Effect.succeed(files.has(path)),
 		readFileString: (path: string) => {
 			const content = files.get(path);
 			return content === undefined
@@ -59,6 +69,11 @@ const makeFileSystemLayer = (
 				: Effect.succeed(content);
 		}
 	});
+
+const makePlatformLayer = (
+	files: ReadonlyMap<string, string>
+): Layer.Layer<FileSystem.FileSystem | Path.Path> =>
+	Layer.mergeAll(makeFileSystemLayer(files), Path.layer);
 
 // ---------------------------------------------------------------------------
 // McpServerConfig — transport variants
@@ -330,9 +345,33 @@ describe('Mcp.loadJson', () => {
 					new Map([
 						[
 							'/.mcp.json',
-							JSON.stringify({
+							toJsonString({
 								mcpServers: {
 									fs: { type: 'stdio', command: 'mcp-fs' }
+								}
+							})
+						]
+					])
+				)
+			)
+		)
+	);
+
+	it.effect('skips the reserved workspace server name', () =>
+		Effect.gen(function* () {
+			const file = yield* loadJson('/.mcp.json');
+			expect(file.mcpServers['workspace']).toBeUndefined();
+			expect(file.mcpServers['safe']).toBeInstanceOf(StdioMcpServer);
+		}).pipe(
+			Effect.provide(
+				makeFileSystemLayer(
+					new Map([
+						[
+							'/.mcp.json',
+							toJsonString({
+								mcpServers: {
+									workspace: { command: 'reserved' },
+									safe: { command: 'safe-server' }
 								}
 							})
 						]
@@ -376,7 +415,7 @@ describe('Mcp.loadJson', () => {
 					new Map([
 						[
 							'/invalid.json',
-							JSON.stringify({
+							toJsonString({
 								mcpServers: {
 									// Unknown transport type
 									bad: { type: 'websocket', url: 'ws://x' }
@@ -387,5 +426,212 @@ describe('Mcp.loadJson', () => {
 				)
 			)
 		)
+	);
+});
+
+// ---------------------------------------------------------------------------
+// effective MCP loading
+// ---------------------------------------------------------------------------
+
+describe('Mcp.loadManagedMcp', () => {
+	it.effect('discovers managed-mcp.json under a managed root', () =>
+		Effect.gen(function* () {
+			const managed = yield* loadManagedMcp({ managedMcpRoot: '/managed' });
+			const file = yield* Option.match(managed, {
+				onNone: () => Effect.die('Expected managed MCP config'),
+				onSome: Effect.succeed
+			});
+			expect(file.mcpServers['managed']).toBeInstanceOf(HttpMcpServer);
+		}).pipe(
+			Effect.provide(
+				makePlatformLayer(
+					new Map([
+						[
+							'/managed/managed-mcp.json',
+							toJsonString({
+								mcpServers: {
+									managed: {
+										type: 'http',
+										url: 'https://managed.example.com/mcp'
+									}
+								}
+							})
+						]
+					])
+				)
+			)
+		)
+	);
+});
+
+describe('Mcp.loadEffective', () => {
+	it.effect('merges plugin, user, project, and local scopes by precedence', () =>
+		Effect.gen(function* () {
+			const effective = yield* loadEffective('/repo', {
+				claudeJsonPath: '/home/user/.claude.json',
+				projectMcpPath: '/repo/.mcp.json',
+				pluginMcpConfigs: [
+					new McpJsonFile({
+						mcpServers: {
+							pluginOnly: new StdioMcpServer({
+								command: 'plugin-only'
+							}),
+							pluginDuplicateEndpoint: new HttpMcpServer({
+								type: 'http',
+								url: 'https://duplicate.example.com/mcp'
+							})
+						}
+					})
+				]
+			});
+
+			expect(effective.mcpServers['pluginOnly']).toMatchObject({
+				command: 'plugin-only'
+			});
+			expect(effective.mcpServers['userOnly']).toMatchObject({
+				command: 'user-only'
+			});
+			expect(effective.mcpServers['projectOnly']).toMatchObject({
+				command: 'project-only'
+			});
+			expect(effective.mcpServers['localOnly']).toMatchObject({
+				url: 'https://local.example.com/mcp'
+			});
+			expect(effective.mcpServers['shared']).toMatchObject({
+				command: 'local-shared'
+			});
+			expect(
+				effective.mcpServers['pluginDuplicateEndpoint']
+			).toBeUndefined();
+			expect(effective.mcpServers['userDuplicateEndpoint']).toMatchObject({
+				url: 'https://duplicate.example.com/mcp'
+			});
+		}).pipe(
+			Effect.provide(
+				makePlatformLayer(
+					new Map([
+						[
+							'/home/user/.claude.json',
+							toJsonString({
+								mcpServers: {
+									shared: { command: 'user-shared' },
+									userOnly: { command: 'user-only' },
+									userDuplicateEndpoint: {
+										type: 'http',
+										url: 'https://duplicate.example.com/mcp'
+									}
+								},
+								projects: {
+									'/repo': {
+										mcpServers: {
+											shared: { command: 'local-shared' },
+											localOnly: {
+												type: 'http',
+												url: 'https://local.example.com/mcp'
+											}
+										}
+									}
+								}
+							})
+						],
+						[
+							'/repo/.mcp.json',
+							toJsonString({
+								mcpServers: {
+									shared: { command: 'project-shared' },
+									projectOnly: { command: 'project-only' }
+								}
+							})
+						]
+					])
+				)
+			)
+		)
+	);
+
+	it.effect('uses managed-mcp.json exclusively when present', () =>
+		Effect.gen(function* () {
+			const effective = yield* loadEffective('/repo', {
+				claudeJsonPath: '/home/user/.claude.json',
+				projectMcpPath: '/repo/.mcp.json',
+				managedMcpRoot: '/managed',
+				pluginMcpConfigs: [
+					new McpJsonFile({
+						mcpServers: {
+							plugin: new StdioMcpServer({ command: 'plugin' })
+						}
+					})
+				]
+			});
+
+			expect(effective.mcpServers['managed']).toMatchObject({
+				command: 'managed-server'
+			});
+			expect(effective.mcpServers['project']).toBeUndefined();
+			expect(effective.mcpServers['user']).toBeUndefined();
+			expect(effective.mcpServers['plugin']).toBeUndefined();
+		}).pipe(
+			Effect.provide(
+				makePlatformLayer(
+					new Map([
+						[
+							'/managed/managed-mcp.json',
+							toJsonString({
+								mcpServers: {
+									managed: { command: 'managed-server' }
+								}
+							})
+						],
+						[
+							'/home/user/.claude.json',
+							toJsonString({
+								mcpServers: { user: { command: 'user-server' } }
+							})
+						],
+						[
+							'/repo/.mcp.json',
+							toJsonString({
+								mcpServers: { project: { command: 'project-server' } }
+							})
+						]
+					])
+				)
+			)
+		)
+	);
+});
+
+// ---------------------------------------------------------------------------
+// serialization
+// ---------------------------------------------------------------------------
+
+describe('Mcp.toClaudeCodeJson', () => {
+	it.effect('omits legacy authorization blocks from emitted config', () =>
+		Effect.gen(function* () {
+			const file = yield* decodeFile({
+				mcpServers: {
+					api: {
+						type: 'http',
+						url: 'https://api.example.com/mcp',
+						oauth: { scopes: 'read write' },
+						authorization: {
+							type: 'bearer',
+							token: 'legacy-token'
+						}
+					},
+					workspace: { command: 'reserved' }
+				}
+			});
+
+			expect(toClaudeCodeJson(file)).toEqual({
+				mcpServers: {
+					api: {
+						type: 'http',
+						url: 'https://api.example.com/mcp',
+						oauth: { scopes: 'read write' }
+					}
+				}
+			});
+		})
 	);
 });

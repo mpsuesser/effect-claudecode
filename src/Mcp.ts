@@ -29,5 +29,22 @@ export {
 // .mcp.json file schema + loader
 // ---------------------------------------------------------------------------
 
-export { McpJsonFile, loadJson } from './Mcp/JsonFile.ts';
-export type { McpJsonFileInput } from './Mcp/JsonFile.ts';
+export {
+	ClaudeJsonFile,
+	ClaudeJsonProject,
+	McpJsonFile,
+	loadClaudeJson,
+	loadEffective,
+	loadJson,
+	loadManagedMcp,
+	managedMcpJsonPaths,
+	mergeMcpJsonFiles,
+	projectMcpJsonPath,
+	toClaudeCodeJson,
+	userClaudeJsonPath
+} from './Mcp/JsonFile.ts';
+export type {
+	EffectiveMcpLoadOptions,
+	ManagedMcpLoadOptions,
+	McpJsonFileInput
+} from './Mcp/JsonFile.ts';

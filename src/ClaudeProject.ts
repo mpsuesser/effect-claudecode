@@ -15,6 +15,7 @@ import * as FileSystem from 'effect/FileSystem';
 import * as Layer from 'effect/Layer';
 import * as Option from 'effect/Option';
 import * as Path from 'effect/Path';
+import * as R from 'effect/Record';
 
 import { McpConfigError } from './Errors.ts';
 import * as Mcp from './Mcp.ts';
@@ -162,22 +163,13 @@ export namespace ClaudeProject
 						providePlatform(
 							Effect.gen(function*()
 							{
-								const exists = yield* fs.exists(mcpPath).pipe(
-									Effect.mapError(
-										(cause) =>
-											new McpConfigError({
-												path: mcpPath,
-												cause,
-											}),
-									),
+								const effective = yield* Mcp.loadEffective(
+									options.cwd,
+									{ projectMcpPath: mcpPath },
 								);
-								if (!exists)
-								{
-									return Option.none<Mcp.McpJsonFile>();
-								}
-								return Option.some(
-									yield* Mcp.loadJson(mcpPath),
-								);
+								return R.isEmptyReadonlyRecord(effective.mcpServers)
+									? Option.none<Mcp.McpJsonFile>()
+									: Option.some(effective);
 							}),
 						),
 						Duration.infinity,
