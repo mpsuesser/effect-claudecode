@@ -25,7 +25,7 @@ import * as Schema from 'effect/Schema';
 export class HookStdinReadError extends Schema.TaggedErrorClass<HookStdinReadError>(
 	'effect-claudecode/HookStdinReadError'
 )('HookStdinReadError', {
-	cause: Schema.Defect
+	cause: Schema.Defect()
 }) {}
 
 /**
@@ -40,7 +40,7 @@ export class HookStdinReadError extends Schema.TaggedErrorClass<HookStdinReadErr
 export class HookInputDecodeError extends Schema.TaggedErrorClass<HookInputDecodeError>(
 	'effect-claudecode/HookInputDecodeError'
 )('HookInputDecodeError', {
-	cause: Schema.Defect,
+	cause: Schema.Defect(),
 	phase: Schema.Literals(['json', 'schema'])
 }) {}
 
@@ -55,7 +55,7 @@ export class HookInputDecodeError extends Schema.TaggedErrorClass<HookInputDecod
 export class HookHandlerError extends Schema.TaggedErrorClass<HookHandlerError>(
 	'effect-claudecode/HookHandlerError'
 )('HookHandlerError', {
-	cause: Schema.Defect
+	cause: Schema.Defect()
 }) {}
 
 /**
@@ -69,7 +69,7 @@ export class HookHandlerError extends Schema.TaggedErrorClass<HookHandlerError>(
 export class HookOutputEncodeError extends Schema.TaggedErrorClass<HookOutputEncodeError>(
 	'effect-claudecode/HookOutputEncodeError'
 )('HookOutputEncodeError', {
-	cause: Schema.Defect
+	cause: Schema.Defect()
 }) {}
 
 /**
@@ -83,7 +83,7 @@ export class HookOutputEncodeError extends Schema.TaggedErrorClass<HookOutputEnc
 export class HookStdoutWriteError extends Schema.TaggedErrorClass<HookStdoutWriteError>(
 	'effect-claudecode/HookStdoutWriteError'
 )('HookStdoutWriteError', {
-	cause: Schema.Defect
+	cause: Schema.Defect()
 }) {}
 
 /**
@@ -99,7 +99,7 @@ export class HookToolDecodeError extends Schema.TaggedErrorClass<HookToolDecodeE
 	event: Schema.Literals(['PreToolUse', 'PostToolUse']),
 	toolName: Schema.String,
 	payload: Schema.Literals(['tool_name', 'tool_input', 'tool_response']),
-	cause: Schema.Defect
+	cause: Schema.Defect()
 }) {}
 
 // ---------------------------------------------------------------------------
@@ -116,7 +116,7 @@ export class TranscriptReadError extends Schema.TaggedErrorClass<TranscriptReadE
 	'effect-claudecode/TranscriptReadError'
 )('TranscriptReadError', {
 	path: Schema.String,
-	cause: Schema.Defect
+	cause: Schema.Defect()
 }) {}
 
 // ---------------------------------------------------------------------------
@@ -133,7 +133,7 @@ export class SettingsReadError extends Schema.TaggedErrorClass<SettingsReadError
 	'effect-claudecode/SettingsReadError'
 )('SettingsReadError', {
 	path: Schema.String,
-	cause: Schema.Defect
+	cause: Schema.Defect()
 }) {}
 
 /**
@@ -146,7 +146,7 @@ export class SettingsParseError extends Schema.TaggedErrorClass<SettingsParseErr
 	'effect-claudecode/SettingsParseError'
 )('SettingsParseError', {
 	path: Schema.String,
-	cause: Schema.Defect
+	cause: Schema.Defect()
 }) {}
 
 /**
@@ -160,7 +160,7 @@ export class SettingsDecodeError extends Schema.TaggedErrorClass<SettingsDecodeE
 	'effect-claudecode/SettingsDecodeError'
 )('SettingsDecodeError', {
 	path: Schema.String,
-	cause: Schema.Defect
+	cause: Schema.Defect()
 }) {}
 
 // ---------------------------------------------------------------------------
@@ -178,7 +178,7 @@ export class PluginWriteError extends Schema.TaggedErrorClass<PluginWriteError>(
 	'effect-claudecode/PluginWriteError'
 )('PluginWriteError', {
 	path: Schema.String,
-	cause: Schema.Defect
+	cause: Schema.Defect()
 }) {}
 
 /**
@@ -192,7 +192,7 @@ export class PluginLoadError extends Schema.TaggedErrorClass<PluginLoadError>(
 	'effect-claudecode/PluginLoadError'
 )('PluginLoadError', {
 	path: Schema.String,
-	cause: Schema.Defect
+	cause: Schema.Defect()
 }) {}
 
 // ---------------------------------------------------------------------------
@@ -210,7 +210,7 @@ export class FrontmatterReadError extends Schema.TaggedErrorClass<FrontmatterRea
 	'effect-claudecode/FrontmatterReadError'
 )('FrontmatterReadError', {
 	path: Schema.String,
-	cause: Schema.Defect
+	cause: Schema.Defect()
 }) {}
 
 /**
@@ -225,7 +225,7 @@ export class FrontmatterParseError extends Schema.TaggedErrorClass<FrontmatterPa
 	'effect-claudecode/FrontmatterParseError'
 )('FrontmatterParseError', {
 	path: Schema.String,
-	cause: Schema.Defect
+	cause: Schema.Defect()
 }) {}
 
 /**
@@ -240,7 +240,7 @@ export class FrontmatterDecodeError extends Schema.TaggedErrorClass<FrontmatterD
 	'effect-claudecode/FrontmatterDecodeError'
 )('FrontmatterDecodeError', {
 	path: Schema.String,
-	cause: Schema.Defect
+	cause: Schema.Defect()
 }) {}
 
 // ---------------------------------------------------------------------------
@@ -257,5 +257,5 @@ export class McpConfigError extends Schema.TaggedErrorClass<McpConfigError>(
 	'effect-claudecode/McpConfigError'
 )('McpConfigError', {
 	path: Schema.String,
-	cause: Schema.Defect
+	cause: Schema.Defect()
 }) {}

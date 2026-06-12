@@ -5,11 +5,11 @@ Write [Claude Code](https://code.claude.com) plugins — hooks, skills, subagent
 ## Install
 
 ```sh
-npm install effect-claudecode effect@4.0.0-beta.46 @effect/platform-node-shared@4.0.0-beta.46
+npm install effect-claudecode effect@4.0.0-beta.80 @effect/platform-node-shared@4.0.0-beta.80
 ```
 
 ```sh
-bun add effect-claudecode effect@4.0.0-beta.46 @effect/platform-node-shared@4.0.0-beta.46
+bun add effect-claudecode effect@4.0.0-beta.80 @effect/platform-node-shared@4.0.0-beta.80
 ```
 
 ## Before / After
