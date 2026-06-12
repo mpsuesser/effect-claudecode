@@ -4,16 +4,16 @@
 
 **Method:** 9 surfaces audited. Per surface: one agent inventoried what the library encodes (source + test fixtures), one researched the current official docs/changelog, one cross-checked the two inventories. Every finding was then adversarially verified — the 45 highest-impact ones by independent docs-lens and code-lens verifier pairs (including empirical decode tests against effect@4.0.0-beta.46 and end-to-end runs of Hook.runMain under bun), the rest by per-surface batch verifiers with live doc fetches. 139 raw findings → 104 confirmed unique findings, 33 cross-surface duplicates merged, 2 refuted (one additional refutation was itself overturned by a direct doc fetch — see the suppressOriginalPrompt finding).
 
-**Current verdict: the library is still NOT fully aligned with Claude Code.** The original P0 hook/plugin/frontmatter/settings drift is mostly closed, but remaining drift is concentrated in MCP scope and managed loading, plugin layout/emission fidelity, FileChanged matcher semantics, residual stale comments/examples, and missing focused tests for newly modeled surface.
+**Current verdict: the library is still NOT fully aligned with Claude Code.** The original P0 hook/plugin/frontmatter/settings drift is mostly closed, and effective MCP scope loading is now implemented. Remaining drift is concentrated in plugin layout/emission fidelity, FileChanged matcher semantics, residual stale comments/examples, and missing focused tests for newly modeled surface.
 
 ## Current implementation status — 2026-06-12
 
-**Code baseline assessed:** `49d30a0 fix(claude-code): align settings and hook edges`.
-The code worktree was clean after that commit. This document update is the only
-new change after the assessed baseline.
+**Code baseline assessed:** `752af9b feat(mcp): load effective server scopes`.
+That slice added effective MCP loading across plugin, user, project, local, and
+managed scopes, plus reserved-name and legacy-authorization emission handling.
 
 **Validation:** `bun run typecheck && bun run test` is green on the assessed
-baseline. Latest run: `21` test files, `207` tests.
+baseline. Latest run: `21` test files, `213` tests.
 
 **Live docs rechecked during status review:** raw markdown for hooks,
 plugins-reference, settings, and MCP from `https://code.claude.com/docs/en/*.md`.
@@ -22,10 +22,10 @@ The live hooks docs currently state that `FileChanged` uses `event` with values
 therefore obsolete.
 
 **Current verdict:** the library is still not completely aligned with current
-Claude Code, but the highest-risk P0 hook/plugin/frontmatter/settings drift is
-largely closed. The remaining alignment work is concentrated in MCP scope and
-managed loading, plugin layout/emission fidelity, a few matcher/comment/test
-residuals, and docs/examples cleanup.
+Claude Code, but the highest-risk P0 hook/plugin/frontmatter/settings/MCP drift
+is largely closed. The remaining alignment work is concentrated in plugin
+layout/emission fidelity, a few matcher/comment/test residuals, and
+docs/examples cleanup.
 
 ### Current status by surface
 
@@ -37,8 +37,8 @@ residuals, and docs/examples cleanup.
 | Matcher semantics | Partial | Standard matcher semantics are mostly implemented. `FileChanged` needs a targeted recheck: docs say literal filenames build the watch list, but filtering uses standard matcher rules against the basename. |
 | Settings schema and loader | Partial but much improved | CLI `--settings`, file-based managed settings, raw retention, and field-aware merges are implemented. Plist/registry/server-managed tiers are not. Full settings-key coverage is not guaranteed. |
 | Settings hooks section | Mostly done | Per-handler `if`, `args`, `asyncRewake`, common handler fields, and `mcp_tool` are modeled. HTTP `allowedEnvVars` is current and should remain. |
-| MCP schema | Partial | `stdio` without `type`, `ws`, `streamable-http`, `oauth`, `headersHelper`, and `alwaysLoad` are modeled. Legacy `authorization` remains and should not be emitted as current config. |
-| MCP scope loading | Open | `~/.claude.json` user/local scopes, `managed-mcp.json`, and reserved `workspace` server-name validation are still missing. |
+| MCP schema | Mostly done | `stdio` without `type`, `ws`, `streamable-http`, `oauth`, `headersHelper`, and `alwaysLoad` are modeled. Legacy `authorization` remains decodable for compatibility but is omitted from emitted current config. |
+| MCP scope loading | Mostly done | Effective loading now covers plugin, user, project, local, and `managed-mcp.json` scopes with documented precedence; `workspace` servers are skipped from loaders/emission. |
 | Plugin manifest/marketplace/frontmatter | Mostly done | Current manifest/userConfig/marketplace/frontmatter P0/P1 schema drift is mostly fixed. |
 | Plugin layout and emission | Partial/open | `themes/`, `monitors/`, `bin/`, plugin-root `settings.json`, `.lsp.json` fallback, `./` path normalization, and skill-path de-dupe still need work. |
 | README/examples/docs comments | Open | Several examples still use unquoted `${CLAUDE_PLUGIN_ROOT}`; some docs comments are stale. |
@@ -127,22 +127,18 @@ residuals, and docs/examples cleanup.
 - `.mcp.json` schema accepts omitted stdio `type`, `streamable-http`, `ws`,
   `headersHelper`, `alwaysLoad`, and current `oauth` objects.
 - MCP environment-variable expansion is documented as pass-through syntax.
+- Effective MCP loading now reads `~/.claude.json` user and local project
+  scopes, project `.mcp.json`, plugin-provided configs, and system
+  `managed-mcp.json` with the documented precedence/exclusive managed behavior.
+- MCP loaders and emission skip the reserved `workspace` server name.
+- Current MCP emission omits legacy `authorization` blocks in favor of `oauth`
+  plus `headers` / `headersHelper`; the legacy field remains decodable only for
+  source compatibility.
 
 ### Remaining work
 
 #### P0 / P1 — finish alignment
 
-- **MCP scope loading is still open.** Add support for `~/.claude.json` user and
-  local scopes and effective server precedence across local, project, user,
-  plugins, and managed sources.
-- **Managed MCP is still open.** Add `managed-mcp.json` discovery/loading and
-  integrate it with managed policy settings.
-- **Reserved MCP server name validation is still open.** Reject or warn on a
-  server named `workspace`.
-- **Legacy MCP `authorization` is still partial.** The current `oauth` field is
-  modeled, but the fabricated legacy `authorization` block remains expressible;
-  it should be removed, deprecated from emission paths, or clearly marked
-  legacy-only.
 - **Plugin layout components are still partial/open.** Scan/write/preserve
   `themes/`, `monitors/`, `bin/`, and plugin-root `settings.json`.
 - **LSP fallback is still partial.** `lspServers` is preserved, but default
@@ -173,7 +169,7 @@ residuals, and docs/examples cleanup.
 
 ### Immediate next steps
 
-1. Start from the clean code baseline `49d30a0` and rerun:
+1. Start from the clean code baseline `752af9b` and rerun:
 
    ```sh
    bun run typecheck && bun run test
@@ -181,10 +177,9 @@ residuals, and docs/examples cleanup.
 
 2. Work the remaining open items in this order:
 
-   1. MCP scope loading and managed MCP.
-   2. Plugin layout/emission fidelity.
-   3. FileChanged matcher behavior and residual hook comments/tests.
-   4. README/examples and stricter optional validation/doc polish.
+   1. Plugin layout/emission fidelity.
+   2. FileChanged matcher behavior and residual hook comments/tests.
+   3. README/examples and stricter optional validation/doc polish.
 
 3. Add fixture tests as each remaining contract is fixed.
 4. Keep this status section authoritative over the historical findings below;
@@ -880,7 +875,7 @@ This document is the work order: each finding is a task, and the sections are or
 
 ## Additional risks (completeness critic)
 
-- **MCP effective configuration remains incomplete.** Project `.mcp.json` is much more current, but effective MCP server resolution still lacks `~/.claude.json` local/user scopes, managed MCP, and reserved-name validation.
+- **MCP policy/effective configuration needs follow-up verification.** Effective MCP server resolution now covers `~/.claude.json` local/user scopes, project `.mcp.json`, plugin configs, managed MCP, and reserved-name handling. Remaining MCP risk is mostly around deeper enterprise policy behavior and future Claude Code field additions.
 - **Plugin write/scan still trails current layout.** Root-level `SKILL.md` discovery is implemented, but `Plugin.write` and `Plugin.scan` still need full support for newer components such as `bin/`, plugin-root `settings.json`, `monitors/`, `themes/`, and `.lsp.json` fallback discovery.
 - **Examples and docs can still teach stale patterns.** README/examples still need cleanup for quoted `${CLAUDE_PLUGIN_ROOT}` paths and for steering new plugin authors toward `skills/` over legacy `commands/`.
 - **Test coverage lags modeled surface.** The implementation now models many current fields, but several newly added settings, hook-entry, and event schemas lack dedicated fixture tests.
