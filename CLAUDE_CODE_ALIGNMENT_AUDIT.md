@@ -4,196 +4,192 @@
 
 **Method:** 9 surfaces audited. Per surface: one agent inventoried what the library encodes (source + test fixtures), one researched the current official docs/changelog, one cross-checked the two inventories. Every finding was then adversarially verified — the 45 highest-impact ones by independent docs-lens and code-lens verifier pairs (including empirical decode tests against effect@4.0.0-beta.46 and end-to-end runs of Hook.runMain under bun), the rest by per-surface batch verifiers with live doc fetches. 139 raw findings → 104 confirmed unique findings, 33 cross-surface duplicates merged, 2 refuted (one additional refutation was itself overturned by a direct doc fetch — see the suppressOriginalPrompt finding).
 
-**Verdict: the library is NOT currently aligned with Claude Code.** The drift is concentrated in (a) hook input field renames that cause decode failures with harmful exit-2 side effects, (b) output schemas that cannot express current capabilities or emit shapes Claude Code ignores, and (c) two months of additive surface (new events, fields, plugin components).
+**Current verdict: the library is still NOT fully aligned with Claude Code.** The original P0 hook/plugin/frontmatter/settings drift is mostly closed, but remaining drift is concentrated in MCP scope and managed loading, plugin layout/emission fidelity, FileChanged matcher semantics, residual stale comments/examples, and missing focused tests for newly modeled surface.
 
-## WIP implementation progress — 2026-06-12 handoff
+## Current implementation status — 2026-06-12
 
-Fixing is in progress across hook, plugin, frontmatter, MCP, settings, and tool-adapter surfaces. Treat the current worktree as WIP because many audit items remain, but the WIP is no longer unvalidated: after the latest continuation, both `bun run typecheck` and `bun run test` are green (`21` test files, `203` tests). Also note there was a pre-existing modified `src/ClaudeProject.ts` before this work; the hook-alignment work did not intentionally originate that modification.
+**Code baseline assessed:** `49d30a0 fix(claude-code): align settings and hook edges`.
+The code worktree was clean after that commit. This document update is the only
+new change after the assessed baseline.
 
-### Files changed in the WIP
+**Validation:** `bun run typecheck && bun run test` is green on the assessed
+baseline. Latest run: `21` test files, `207` tests.
 
-- Runner/context/envelope: `src/Hook/Runner.ts`, `src/Errors.ts`, `src/Hook/Envelope.ts`, `src/Hook/Context.ts`, `src/Hook.ts`
-- Existing hook events: nearly every file under `src/Hook/Events/` was touched to add `terminalSequence` and/or fix schemas.
-- New hook events added: `src/Hook/Events/Setup.ts`, `UserPromptExpansion.ts`, `PostToolBatch.ts`, `MessageDisplay.ts`
-- Event aggregate exports updated: `src/Hook/Events/index.ts`, `src/Hook.ts`
-- **Started after the initial hook WIP:** Plugin manifest/marketplace schemas, plugin load/name fallback behavior, plugin definition validation, plugin layout manifest preservation, and Frontmatter schemas. See the plugin/frontmatter continuation section below.
-- **Validated in latest continuation:** `bun run typecheck && bun run test` passes after hook, plugin/frontmatter, MCP, settings-merge, and tool-adapter edits.
-- **Still not complete:** settings schema completeness and managed/CLI precedence, plugin layout components and emitted path normalization, MCP scope/managed-policy loading, matcher semantics, marketplace/loader precedence, and several P2/P3 docs/example cleanups.
+**Live docs rechecked during status review:** raw markdown for hooks,
+plugins-reference, settings, and MCP from `https://code.claude.com/docs/en/*.md`.
+The live hooks docs currently state that `FileChanged` uses `event` with values
+`change | add | unlink`; the older refutation at the bottom of this audit is
+therefore obsolete.
 
-### Runner/control-output work completed
+**Current verdict:** the library is still not completely aligned with current
+Claude Code, but the highest-risk P0 hook/plugin/frontmatter/settings drift is
+largely closed. The remaining alignment work is concentrated in MCP scope and
+managed loading, plugin layout/emission fidelity, a few matcher/comment/test
+residuals, and docs/examples cleanup.
 
-- Added `HookControlledExit` in `src/Errors.ts`.
-- Added `HookProcessOutput` as a `Schema.TaggedClass` plus helpers in `src/Hook/Runner.ts`:
-  - `processOutput({ stdout?, stderr?, exitCode? })`
-  - `stderrExit(stderr, exitCode = 2)`
-  - `rawStdout(stdout)`
-- `HookDefinition.handler` now permits returning `Out | HookProcessOutput`.
-- `runHookFromParsed` now detects `HookProcessOutput` via `Schema.is(HookProcessOutput)`, writes raw stdout/stderr, and for non-zero exits fails with `HookControlledExit` so `hookTeardown` returns the handler-requested exit code.
-- This was intended to support WorktreeCreate raw stdout paths and exit-2 hook outcomes for TeammateIdle/TaskCreated/TaskCompleted.
-- **Follow-up needed:** `Testing.runHookWithMockStdin` still assumes stdout is JSON and will throw for raw stdout (e.g. WorktreeCreate). Update it to preserve raw stdout without JSON parsing failure, or add a separate raw-output helper.
+### Current status by surface
 
-### Common envelope/context work completed
+| Surface | Status | Notes |
+|---|---:|---|
+| Hook event input/output schemas | Mostly done | All 30 current events are modeled. Most P0/P1 field renames and output additions are implemented. |
+| Hook runner and testing harness | Mostly done | Handler-controlled raw stdout/stderr and exit-code paths are implemented; `runHookWithMockStdin` preserves raw stdout. Some comments/JSDoc still overstate old semantics. |
+| Tool adapters | Mostly done | Current Bash/Read shapes and common built-in tools are modeled. Coverage can still expand for less-common tools. |
+| Matcher semantics | Partial | Standard matcher semantics are mostly implemented. `FileChanged` needs a targeted recheck: docs say literal filenames build the watch list, but filtering uses standard matcher rules against the basename. |
+| Settings schema and loader | Partial but much improved | CLI `--settings`, file-based managed settings, raw retention, and field-aware merges are implemented. Plist/registry/server-managed tiers are not. Full settings-key coverage is not guaranteed. |
+| Settings hooks section | Mostly done | Per-handler `if`, `args`, `asyncRewake`, common handler fields, and `mcp_tool` are modeled. HTTP `allowedEnvVars` is current and should remain. |
+| MCP schema | Partial | `stdio` without `type`, `ws`, `streamable-http`, `oauth`, `headersHelper`, and `alwaysLoad` are modeled. Legacy `authorization` remains and should not be emitted as current config. |
+| MCP scope loading | Open | `~/.claude.json` user/local scopes, `managed-mcp.json`, and reserved `workspace` server-name validation are still missing. |
+| Plugin manifest/marketplace/frontmatter | Mostly done | Current manifest/userConfig/marketplace/frontmatter P0/P1 schema drift is mostly fixed. |
+| Plugin layout and emission | Partial/open | `themes/`, `monitors/`, `bin/`, plugin-root `settings.json`, `.lsp.json` fallback, `./` path normalization, and skill-path de-dupe still need work. |
+| README/examples/docs comments | Open | Several examples still use unquoted `${CLAUDE_PLUGIN_ROOT}`; some docs comments are stale. |
 
-- `src/Hook/Envelope.ts` now defines `EffortLevel`, `HookEffort`, and optional common fields `effort`, `agent_id`, `agent_type`.
-- `src/Hook/Context.ts` now surfaces `effort`, `agentId`, `agentType` as `Option`s; `src/Hook.ts` re-exports the accessors.
+### Completed since the original audit
 
-### Existing hook event fixes started/completed
+#### Hook events, runner, tool adapters, and tests
 
-- Universal output field `terminalSequence` was added across existing event `Output` classes.
-- `PermissionRequest.ts`
-  - Added `PermissionRule` object shape `{ toolName, ruleContent? }`.
-  - `PermissionSuggestion.rules` now uses `PermissionRule[]` instead of `string[]`.
-  - Replaced `PermissionUpdate` class with a union of rule/mode/directory update variants.
-  - Added deny-only `interrupt` to `PermissionDecision` and `deny(message, { interrupt })`.
-- `SessionEnd.ts`
-  - Input field renamed from `exit_reason` to `reason`; matcher selector updated.
-- `StopFailure.ts`
-  - Input fields renamed to `error` and `error_details`; added `last_assistant_message`.
-  - Error enum now includes `overloaded`, `oauth_org_not_allowed`, `model_not_found`.
-- `ConfigChange.ts`
-  - Input field renamed from `config_source` to `source`; added `file_path`; matcher selector updated.
-- `Notification.ts`
-  - Added notification types `elicitation_complete` and `elicitation_response`.
-  - Removed Notification `hookSpecificOutput` schema from output; `addContext()` now deprecated and emits `systemMessage` instead.
-- `WorktreeCreate.ts`
-  - Input changed to required `name`.
-  - `created(path)` now returns raw stdout via `HookProcessOutput`; `createdHttp(path)` preserves JSON `hookSpecificOutput.worktreePath` for HTTP-style usage.
-- `TeammateIdle.ts`
-  - `keepWorking(reason)` now returns exit-2 stderr via `HookProcessOutput`.
-  - Added `stopTeammate(reason)` for the old JSON `{ continue: false, stopReason }` behavior.
-- `TaskCreated.ts` / `TaskCompleted.ts`
-  - `block(reason)` now returns exit-2 stderr via `HookProcessOutput`.
-  - Added `stopTeammate(reason)` for JSON `{ continue: false, stopReason }` behavior.
-- `PreToolUse.ts`
-  - Added `passthrough()` neutral helper.
-  - Changed default non-match behavior in `onTool`, `onMatcher`, and `onAdapter` from `allow()` to `passthrough()`.
-  - Updated `defer()` JSDoc to describe headless suspend/resume semantics.
-- `PostToolUse.ts`
-  - Added input `duration_ms`.
-  - Added `updatedToolOutput` and `replaceOutput(...)` helper while preserving `updatedMCPToolOutput`.
-- `PostToolUseFailure.ts`
-  - Fixed docs anchor typo.
-  - Added input `duration_ms`.
-  - Added optional top-level `decision: 'block'` / `reason` and `block(reason)` helper.
-- `PreCompact.ts`
-  - Added input `custom_instructions`.
-  - Added top-level `decision: 'block'` / `reason` and `block(reason)` helper.
-- `PostCompact.ts`
-  - Added input `compact_summary`.
-- `Stop.ts`
-  - Removed stale `custom_instructions` input.
-  - Added `last_assistant_message`, `background_tasks`, `session_crons` schemas.
-  - Added `hookSpecificOutput.additionalContext` and `addContext()`.
-- `SubagentStop.ts`
-  - Imports/reuses `BackgroundTask` and `SessionCron` from `Stop.ts`.
-  - Added `background_tasks`, `session_crons`.
-  - Added `hookSpecificOutput.additionalContext` and `addContext()`.
-- `SessionStart.ts`
-  - Added input `session_title`.
-  - Added output fields `initialUserMessage`, `sessionTitle`, `watchPaths`, `reloadSkills` and helpers (`startWithMessage`, `renameSession`, `watchPaths`, `reloadSkills`).
-- `UserPromptSubmit.ts`
-  - Added output `suppressOriginalPrompt` and `block(reason, { suppressOriginalPrompt })`.
-- `CwdChanged.ts`
-  - Added input `old_cwd`, `new_cwd`.
-  - Added output `watchPaths` and helper.
-- `FileChanged.ts`
-  - Changed input from `change_type: created|modified|deleted` to `event: change|add|unlink`, and added output `watchPaths`.
-  - **Important caveat:** this contradicts this audit's “Checked and refuted” section, but the live `https://code.claude.com/docs/en/hooks.md` fetched during this WIP session showed `event` with `change|add|unlink`. Re-verify live docs before deciding whether to keep or revert this change.
-- `Elicitation.ts`
-  - Input now includes `message`, `mode`, `url`, `elicitation_id`, `requested_schema`; removed phantom `tool_name` / `tool_input` fields.
-- `ElicitationResult.ts`
-  - Input now includes `action`, `mode`, `elicitation_id`, `content`; removed stale `user_response`.
+- `PermissionRequest` now accepts object-shaped permission suggestion rules and
+  emits current `updatedPermissions` variants; deny decisions support
+  `interrupt`.
+- `SessionEnd`, `StopFailure`, `ConfigChange`, `Elicitation`,
+  `ElicitationResult`, `CwdChanged`, and `FileChanged` inputs now use current
+  field names and expose current event-specific fields.
+- `Notification` current notification types are modeled, and the old
+  Notification-specific `additionalContext` helper is deprecated in favor of
+  common output fields.
+- `WorktreeCreate.created()` now emits raw stdout for command hooks, while an
+  HTTP-style helper remains available for JSON `hookSpecificOutput` output.
+- `TeammateIdle.keepWorking()`, `TaskCreated.block()`, and
+  `TaskCompleted.block()` now use handler-controlled exit-2 stderr paths; the
+  old JSON stop-teammate behavior is exposed separately.
+- `PreToolUse` has a true neutral `passthrough()` helper, non-matching
+  `onTool`/`onMatcher`/`onAdapter` paths no longer auto-allow, and `defer()`
+  documentation describes headless suspend/resume semantics.
+- `PostToolUse` and `PostToolUseFailure` expose `duration_ms`; `PostToolUse`
+  supports universal `updatedToolOutput`.
+- Universal `terminalSequence` output is present across modeled event outputs.
+- `PreCompact`, `PostCompact`, `Stop`, `SubagentStop`, `SessionStart`, and
+  `UserPromptSubmit` have the current notable input/output additions.
+- The four previously missing events are added and exported: `Setup`,
+  `UserPromptExpansion`, `PostToolBatch`, and `MessageDisplay`.
+- Common envelope/context fields `effort`, `agent_id`, and `agent_type` are
+  modeled and exposed through `HookContext`.
+- Tool adapters now cover current Bash/Read shapes plus Write, Edit, Glob,
+  Grep, WebFetch, WebSearch, Agent, AskUserQuestion, and ExitPlanMode.
+- `Testing.fixtures` stale defaults were corrected, and
+  `runHookWithMockStdin` no longer assumes stdout is always JSON.
 
-### New event modules added
+#### Settings and hook configuration
 
-Added modules based on the live hooks reference:
+- `Settings.load` now reads user, project, local, optional CLI overlay, and
+  file-based managed settings roots/drop-ins in the correct implemented order.
+- Known array/object settings are merged with field-aware semantics instead of
+  a shallow top-level replace; permission arrays, hook groups, sandbox arrays,
+  plugin records, HTTP hook allowlists, and related arrays are preserved/merged.
+- Decoded `SettingsFile.raw` preserves source JSON keys so newly added Claude
+  Code settings are not completely lost before first-class fields are added.
+- Major current settings fields are modeled, including sandbox, attribution,
+  language, effort/model fields, HTTP hook allowlists, plugin policy/config
+  fields, managed MCP policy settings, worktree, and several recent UI flags.
+- `apiKeyHelper` accepts the current string script-path form while retaining a
+  deprecated object fallback.
+- `extraKnownMarketplaces` supports current source variants and `autoUpdate`.
+- `statusLine.refreshInterval` is modeled and the undocumented `disabled`
+  status-line type was removed.
+- Hook handler config now models per-handler `if`, `args`, `asyncRewake`,
+  `statusMessage`, `once`, and `mcp_tool`.
+- Live docs confirm per-HTTP-hook `allowedEnvVars` and top-level
+  `httpHookAllowedEnvVars` are current, so those fields should remain.
 
-- `Setup.ts`: `trigger: init|maintenance`, `hookSpecificOutput.additionalContext`, matcher on trigger.
-- `UserPromptExpansion.ts`: `expansion_type`, `command_name`, `command_args`, `command_source`, `prompt`, top-level block decision, additionalContext, matcher on command name.
-- `PostToolBatch.ts`: `tool_calls[]` with tool name/input/use id/response, top-level block decision, additionalContext.
-- `MessageDisplay.ts`: `turn_id`, `message_id`, `index`, `final`, `delta`, output `displayContent`.
+#### Plugin, marketplace, and frontmatter
 
-`src/Hook/Events/index.ts` now includes these in the union and updates the comment to “all 30 events”; `src/Hook.ts` re-exports them.
+- `hooks/hooks.json` load accepts both documented wrapped files and legacy bare
+  `HooksSection` files; write emits the documented `{ "hooks": ... }` wrapper.
+- Plugin manifest schema now preserves current fields such as `$schema`,
+  `displayName`, `defaultEnabled`, `dependencies`, `experimental`,
+  `lspServers`, and current component path specs.
+- `UserConfigEntry` models required `type`, `title`, and `description`, plus
+  current optional fields.
+- Marketplace schema includes current source variants (`url`, `git-subdir`,
+  `npm`), GitHub `sha` / `skipLfs`, required owner, metadata, cross-marketplace
+  policy, and plugin entry metadata/component fields.
+- Skill and output-style frontmatter names are optional and fall back to the
+  directory/file basename where appropriate.
+- Current frontmatter fields are modeled across skills, commands, output styles,
+  and subagents, including `xhigh` effort, skill `paths` string-or-array,
+  `disallowed-tools`, `when_to_use`, `arguments`, output-style
+  `keep-coding-instructions` / `force-for-plugin`, subagent `mcpServers`,
+  `color`, and `initialPrompt`.
+- Root-level `SKILL.md` discovery is implemented.
+- `commands/` is documented in source as the legacy skill-style command form.
 
-### Plugin/frontmatter continuation update — later 2026-06-12 WIP
+#### MCP
 
-A later continuation started the P0/P1 plugin/frontmatter work. This slice has since been validated by the latest continuation (`bun run typecheck && bun run test` is green), but the code remains WIP because follow-up audit items are still open. `src/Plugin/Load.ts` in particular should still be inspected before extending it further.
+- `.mcp.json` schema accepts omitted stdio `type`, `streamable-http`, `ws`,
+  `headersHelper`, `alwaysLoad`, and current `oauth` objects.
+- MCP environment-variable expansion is documented as pass-through syntax.
 
-Completed or partially completed in the current worktree:
+### Remaining work
 
-- `src/Plugin/Manifest.ts` was rewritten for current `plugin.json` fields:
-  - Preserves/models `$schema`, `displayName`, `defaultEnabled`, `dependencies`, `experimental`, `lspServers`, and current component path specs.
-  - `UserConfigEntry` now models required `type`, `title`, `description` plus `sensitive`, `required`, `default`, `multiple`, `min`, `max`.
-  - `hooks`, `mcpServers`, and `lspServers` accept path specs or inline records where appropriate.
-  - `src/Plugin.ts` barrel exports were updated for the new helpers/classes.
-- `src/Plugin/Marketplace.ts` was rewritten for current marketplace sources:
-  - Added `url`, `git-subdir`, and `npm` source variants.
-  - Added `sha` / `skipLfs` support to GitHub sources.
-  - Kept legacy `directory` source as deprecated; current docs prefer relative path strings.
-  - Added required `owner`, metadata, `allowCrossMarketplaceDependenciesOn`, and plugin-entry component/metadata fields.
-- Frontmatter schemas were expanded:
-  - `src/Frontmatter/Skill.ts`: `name` and `description` are optional; added current skill/command-like fields such as `when_to_use`, `disable-model-invocation`, `user-invocable`, allowed/disallowed tools, `argument-hint`, `context`, `agent`, `model`, `effort`, `paths`, `shell`, and inline `hooks`.
-  - `src/Frontmatter/Command.ts`: updated to the current skill-style slash-command surface.
-  - `src/Frontmatter/OutputStyle.ts`: `name` optional; added `keep-coding-instructions` and `force-for-plugin`.
-  - `src/Frontmatter/Subagent.ts`: added/updated `effort`, `maxTurns`, `initialPrompt`, `color`, `tools`, `disallowedTools`, `skills`, `mcpServers`, `memory`, `background`, and a doc note that plugin agents ignore `hooks`, `mcpServers`, and `permissionMode`.
-- Plugin load/definition/layout work started:
-  - `src/Plugin/Load.ts` skill discovery now looks at default `skills/*/SKILL.md`, falls back to root `SKILL.md` when no default skill directory entries exist, and combines declared skill paths with default skill paths.
-  - Newly touched `Effect.forEach` calls in that helper use explicit `{ concurrency: 1 }`.
-  - Skill names fall back to the containing directory basename; output-style names fall back to the file basename.
-  - `src/Plugin/Define.ts` now tolerates optional skill/output-style frontmatter names via `Option.Option<string>` in `validateNamedFrontmatter`.
-  - `PluginDefinitionError` was added in `src/Errors.ts` for frontmatter-name mismatch failures.
-  - `src/Plugin/Layout.ts` `syncManifest` preservation was expanded to match the manifest metadata fields above.
+#### P0 / P1 — finish alignment
 
-Important plugin/frontmatter status after the latest continuation:
+- **MCP scope loading is still open.** Add support for `~/.claude.json` user and
+  local scopes and effective server precedence across local, project, user,
+  plugins, and managed sources.
+- **Managed MCP is still open.** Add `managed-mcp.json` discovery/loading and
+  integrate it with managed policy settings.
+- **Reserved MCP server name validation is still open.** Reject or warn on a
+  server named `workspace`.
+- **Legacy MCP `authorization` is still partial.** The current `oauth` field is
+  modeled, but the fabricated legacy `authorization` block remains expressible;
+  it should be removed, deprecated from emission paths, or clearly marked
+  legacy-only.
+- **Plugin layout components are still partial/open.** Scan/write/preserve
+  `themes/`, `monitors/`, `bin/`, and plugin-root `settings.json`.
+- **LSP fallback is still partial.** `lspServers` is preserved, but default
+  `.lsp.json` discovery/loading is not complete.
+- **Plugin manifest emitted paths are still stale.** Defaults still emit bare
+  strings in some paths; either omit default component fields or emit documented
+  `./`-prefixed relative paths.
+- **Skill path de-duplication remains open.** Default `skills/` and declared
+  skill paths are now additive, but duplicates should be normalized away.
+- **FileChanged matcher semantics need a targeted fix/test.** Current docs say
+  literal segments build the watch list, but standard matcher rules filter the
+  changed basename. Current helper behavior appears too literal for filtering.
 
-- `hooks/hooks.json` wrapper support is now implemented:
-  - `src/Plugin/Load.ts` accepts both documented wrapped `{ "hooks": { ... } }` files and legacy bare `HooksSection` files via `WrappedHooksFile` / `HooksFile`.
-  - `src/Plugin/Define.ts` now writes documented wrapped hook files: `{ "hooks": definition.hooksConfig.value }`.
-- Remaining raw `new Error(...)` in touched plugin load/write code was cleaned up; plugin load path errors now use string defect payloads inside `PluginLoadError` / `PluginWriteError`.
-- Frontmatter `*Input` type aliases were corrected to use `typeof Class.Type` instead of constructor parameters so builders accept current optional frontmatter fields.
-- Tests were updated for current optional skill/output-style names and required plugin `userConfig` fields.
-- Still review whether combined default + declared skill paths should be de-duplicated.
+#### P2 / P3 — polish and coverage
 
-### Latest continuation update — later 2026-06-12
+- Add stronger dedicated tests for the four newly modeled hook events and for
+  newly added settings/hook-entry fields (`mcp_tool`, per-handler `if`, `args`,
+  `asyncRewake`, raw settings retention, sandbox, marketplace variants, etc.).
+- Tighten or document deliberate openness for skill/subagent constraints:
+  skill name/description spec constraints, subagent name pattern, and subagent
+  `memory` enum.
+- Keep body substitution parsing explicitly out of scope or document the current
+  opaque pass-through behavior more clearly.
+- Update README/examples to quote `${CLAUDE_PLUGIN_ROOT}` in shell-form hook
+  commands.
+- Clean stale source comments/JSDoc, especially runner exit-code summaries,
+  `Errors.ts` decode-failure wording, and PostToolUse replacement helper docs.
 
-Completed and validated in this continuation:
+### Immediate next steps
 
-- **Validation:** `bun run typecheck && bun run test` passes; latest run: `21` test files, `203` tests.
-- **Plugin hooks wrapper:** load accepts wrapped/bare hooks; write emits wrapped hooks.
-- **Frontmatter/plugin tests:** updated stale tests for optional `SkillFrontmatter.name` / `description`, optional `OutputStyleFrontmatter.name`, and current `UserConfigEntry` requirements.
-- **Tool adapters (`src/Hook/Tool.ts`):**
-  - Updated `BashToolInput` with `description`, `timeout`, `run_in_background`.
-  - Updated `BashToolResponse` to current `{ stdout, stderr, interrupted, isImage }` shape.
-  - Updated `ReadToolInput` with `offset` / `limit`.
-  - Added built-in schemas/adapters for `Write`, `Edit`, `Glob`, `Grep`, `WebFetch`, `WebSearch`, `Agent`, `AskUserQuestion`, and `ExitPlanMode`.
-  - Generalized `PreToolUse.onTool` and `PostToolUse.onTool` over `Tool.SupportedToolName` instead of Bash/Read-only overloads.
-  - Added tests for current Bash response shape and WebSearch typed `onTool`.
-- **MCP tests/schema coverage:**
-  - Tests now cover omitted stdio `type`, `streamable-http`, `ws`, `headersHelper`, `alwaysLoad`, and current `oauth` object.
-  - Existing schema already includes those fields/variants; stale websocket rejection expectation was updated.
-- **Settings loader:**
-  - `Settings.load` now uses explicit `{ concurrency: 1 }` for load/decode fan-out.
-  - Replaced shallow top-level spread semantics with known field-aware merging: hook groups concatenate, permission arrays concatenate/dedupe while scalar modes override, and relevant records use higher-scope key override.
-  - Updated the stale shallow-merge test to assert current permission merge behavior.
+1. Start from the clean code baseline `49d30a0` and rerun:
 
-Suggested skills for the next coding session: load at least four relevant Effect skills before coding, especially `effect-schema-v4`, `effect-error-handling`, `effect-testing`, and `effect-filesystem`/`effect-path`; also load `effect-concurrency-testing` if touching `Effect.forEach` / `Effect.all` and `effect-schema-composition` if adding JSON codecs.
+   ```sh
+   bun run typecheck && bun run test
+   ```
 
-### Immediate next steps for a fresh agent
+2. Work the remaining open items in this order:
 
-1. Start by running `bun run typecheck && bun run test` to confirm the recorded green baseline still holds.
-2. Inspect the current WIP diffs before continuing, especially:
-   - `src/Settings/Schema.ts`, `src/Settings/Loader.ts`
-   - `src/Mcp/Schema.ts`, `src/Mcp/JsonFile.ts`, `src/ClaudeProject.ts`
-   - `src/Plugin/Load.ts`, `src/Plugin/Define.ts`, `src/Plugin/Layout.ts`, `src/Plugin/Manifest.ts`, `src/Plugin/Marketplace.ts`
-   - `src/Hook/Matcher.ts`, `src/Hook/Tool.ts`, `src/Testing.ts`
-3. Continue partially started P0/P1/P2 surfaces:
-   - Settings schema completeness: sandbox, attribution/fallback/available model fields, language, alwaysThinkingEnabled, allowed hook env/url fields, recent settings keys, plugin config options, managed settings and `--settings` precedence.
-   - MCP scope support: user/local `~/.claude.json`, managed MCP loader/policy settings, reserved server name validation, timeout docs/fixtures.
-   - Plugin layout/components: `themes/`, `monitors/`, `bin/`, plugin-root `settings.json`, `.lsp.json` fallback, emitted `./` path normalization or default-field omission, skill path de-duplication.
-   - Matcher semantics in `src/Hook/Matcher.ts`: `*`/empty match-all, exact/pipe-list for plain tokens, regex fallback, literal filename handling for `FileChanged`.
-   - Settings/HooksSection and examples docs: check if `allowedEnvVars` on HTTP hooks should remain, quote `${CLAUDE_PLUGIN_ROOT}` in examples/README, and clean stale docs comments.
-4. Add or update fixture tests for remaining schema changes as each module is fixed.
-5. Keep rerunning `bun run typecheck && bun run test` after each coherent module slice.
+   1. MCP scope loading and managed MCP.
+   2. Plugin layout/emission fidelity.
+   3. FileChanged matcher behavior and residual hook comments/tests.
+   4. README/examples and stricter optional validation/doc polish.
+
+3. Add fixture tests as each remaining contract is fixed.
+4. Keep this status section authoritative over the historical findings below;
+   the detailed finding list remains the original audit backlog and may still
+   contain stale “Library:” descriptions for items already fixed.
 
 ## Instructions for the fixing agent
 
@@ -203,9 +199,9 @@ This document is the work order: each finding is a task, and the sections are or
 2. **Work one priority tier at a time** (P0 → P1 → P2 → P3), module by module within a tier. Run `bun run test && bun run typecheck` after each module; commit at least once per tier.
 3. **Every input-schema change needs a fixture test** that decodes the documented payload verbatim (quoted in the finding's "Current" line, or at the cited URL). Update `Testing.fixtures` in the same change so the testing harness stops emitting stale shapes (see the Testing finding under P2).
 4. **Ground truth is the cited doc page, not this file.** Where a finding carries an explicit caveat ("could not be fully evidenced", "confirm placement empirically"), fetch the cited URL before coding — appending `.md` to a docs path (e.g. `code.claude.com/docs/en/hooks.md`) returns raw markdown that is easy to grep. Resolve caveats from the live page; never guess.
-5. **The four unmodeled events** (Setup, UserPromptExpansion, PostToolBatch, MessageDisplay) are summarized but not fully specified here. Fetch the hooks reference for their complete input/output schemas before writing those modules.
+5. **Previously unmodeled events** (Setup, UserPromptExpansion, PostToolBatch, MessageDisplay) now have source modules. If touching them again, fetch the live hooks reference and add focused fixture tests for their complete input/output schemas.
 6. **Schema philosophy:** inputs stay open and tolerant — unknown fields ignored, prefer optional unless the docs mark a field required. A too-strict input schema is the worst failure mode in this audit: a decode failure exits 2, which on several events has destructive side effects (denies permissions, blocks config changes). Outputs emit only documented fields.
-7. **Scope:** the "Additional risks" section is feature/design work — defer it unless asked. The "Checked and refuted" section requires no changes. If you intentionally skip a finding, say so in your summary instead of dropping it silently.
+7. **Scope:** the "Additional risks" section now lists active residual risks, not merely deferred feature work. The "Checked and refuted" section requires no changes unless new live-doc evidence contradicts it. If you intentionally skip a finding, say so in your summary instead of dropping it silently.
 
 ## P0 — Breaking: decode failures, wrong emissions, inverted semantics
 
@@ -884,16 +880,19 @@ This document is the work order: each finding is a task, and the sections are or
 
 ## Additional risks (completeness critic)
 
-- **Effect peer dependency drift.** `peerDependencies` pins `effect@^4.0.0-beta.46`, but npm `beta` dist-tag is now `4.0.0-beta.80`. The caret range resolves to `.80` on a fresh install while the library was built and tested against `.46`; beta-to-beta breaking changes in Effect v4 make this a real first-install risk. Consider pinning exact betas or testing against current.
-- **Testing module is built on stale fixtures.** `src/Testing.ts` (fixtures, runHookWithMockStdin, expect* helpers) inherits every input-schema error above — e.g. fixtures emit `config_source`/`exit_reason`, so tests written with the harness pass against payloads real Claude Code never sends (see the confirmed Testing.fixtures finding under P2).
-- **No path for the official getting-started flow.** `claude plugin init` scaffolds into `~/.claude/skills/<name>/` (auto-loaded, zero-install dev loop) and the docs recommend root-level single-SKILL.md plugins as the starting point; `Plugin.write`/`Plugin.scan` support neither (see the root-SKILL.md finding under P1).
-- **`Plugin.write` cannot emit newer plugin components** — no `bin/`, plugin-root `settings.json`, or `experimental.themes`/`monitors` in the manifest (overlaps the P1 layout finding; flagged here because Plugin.write is the README's primary workflow).
+- **MCP effective configuration remains incomplete.** Project `.mcp.json` is much more current, but effective MCP server resolution still lacks `~/.claude.json` local/user scopes, managed MCP, and reserved-name validation.
+- **Plugin write/scan still trails current layout.** Root-level `SKILL.md` discovery is implemented, but `Plugin.write` and `Plugin.scan` still need full support for newer components such as `bin/`, plugin-root `settings.json`, `monitors/`, `themes/`, and `.lsp.json` fallback discovery.
+- **Examples and docs can still teach stale patterns.** README/examples still need cleanup for quoted `${CLAUDE_PLUGIN_ROOT}` paths and for steering new plugin authors toward `skills/` over legacy `commands/`.
+- **Test coverage lags modeled surface.** The implementation now models many current fields, but several newly added settings, hook-entry, and event schemas lack dedicated fixture tests.
 
 ## Checked and refuted — library is correct, no change needed
 
-- **replaceMcpOutput emits soft-deprecated updatedMCPToolOutput as the only output-replacement path** — refuted: REFUTED — the "current docs" half of the finding is inaccurate; the docs say the opposite of the claimed quote.  Library half (accurate as described): /Users/m/repos/effect-claudecode/src/Hook/Events/PostToolUse.ts — HookSpecificOutput has only `updatedMCPToolOutput` (line 46), and `replaceMcpOutput(updatedMCPToolOutput, additionalContext?)` (lines 101-111) is the sole replacement helper, with doc
-- **FileChanged input is `event` with values change|add|unlink, not `change_type` with created|modified|deleted — every payload fails decode** — refuted: REFUTED. The "current docs" half of the finding is false. Official docs (https://code.claude.com/docs/en/hooks.md, fetched 2026-06-12) document the FileChanged input field as `change_type` with allowed values "created" / "modified" / "deleted" — verbatim: 'The `change_type` field indicates the kind of change with these allowed values: "created" — file was created, "modified" — file was modified, "deleted" — file was deleted.' The library (src/Hook/Events/FileChanged.ts:24-35) matches the docs exactly. (The same claim surfaced independently on the hook-runner surface and was refuted there too.)
+- **replaceMcpOutput emits soft-deprecated updatedMCPToolOutput as the only output-replacement path** — refuted: the original finding's claim about current docs was inaccurate. The current docs still support `updatedMCPToolOutput`; the library also now exposes universal `updatedToolOutput` separately.
+
+## Superseded refutations
+
+- **FileChanged input shape.** The earlier refutation that claimed FileChanged still used `change_type: created|modified|deleted` is obsolete. Live `https://code.claude.com/docs/en/hooks.md` fetched during the current status review documents `file_path` plus `event: "change" | "add" | "unlink"`. The current source follows that shape. Remaining work is matcher semantics, not input shape.
 
 ## Coverage
 
-Surfaces audited: hook events (tool / session / misc tiers, all 26 modeled events), hook runner mechanics (envelope, exit codes, matchers, tool adapters, transcript, env vars), settings.json schema + loader precedence, plugin system (manifest, layout, load/scan, marketplace, validate, define/write), .mcp.json, frontmatter (commands, output styles, skills, subagents). Not audited: ClaudeRuntime presets and ClaudeProject service internals (pure library code with no external contract beyond the schemas above); Testing module covered only via its fixtures.
+Surfaces audited: hook events (tool / session / misc tiers, all 30 current events), hook runner mechanics (envelope, exit codes, matchers, tool adapters, transcript, env vars), settings.json schema + loader precedence, plugin system (manifest, layout, load/scan, marketplace, validate, define/write), `.mcp.json` and MCP scope/config gaps, frontmatter (commands, output styles, skills, subagents), and testing helpers/fixtures. Not audited in depth: ClaudeRuntime presets and non-schema ClaudeProject service internals.
