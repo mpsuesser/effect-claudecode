@@ -1,10 +1,9 @@
 /**
  * Settings.json loader.
  *
- * Reads ~/.claude/settings.json, `<cwd>/.claude/settings.json`, and
- * `<cwd>/.claude/settings.local.json`, decodes each against
- * `SettingsFile`, and shallow-merges the results in priority order
- * (user → project → local). Requires `FileSystem`, `Path`, and a
+ * Reads user, project, local, optional CLI, and file-based managed
+ * settings, decodes each against `SettingsFile`, and merges them in
+ * Claude Code priority order. Requires `FileSystem`, `Path`, and a
  * `ConfigProvider` (for home-directory lookup) in the environment.
  *
  * @since 0.1.0
@@ -14,9 +13,11 @@ import * as Config from 'effect/Config';
 import * as Effect from 'effect/Effect';
 import * as FileSystem from 'effect/FileSystem';
 import * as Option from 'effect/Option';
+import * as Order from 'effect/Order';
 import * as Path from 'effect/Path';
 import * as R from 'effect/Record';
 import * as Schema from 'effect/Schema';
+import * as Str from 'effect/String';
 
 import {
 	SettingsDecodeError,
@@ -25,7 +26,11 @@ import {
 } from '../Errors.ts';
 import {
 	PermissionsConfig,
+	SandboxConfig,
+	SandboxFilesystemConfig,
+	SandboxNetworkConfig,
 	SettingsFile,
+	SettingsRaw,
 	WorkingDirectoriesConfig
 } from './Schema.ts';
 
@@ -56,6 +61,21 @@ interface LoadedSource {
 	readonly content: Option.Option<string>;
 }
 
+export interface LoadOptions {
+	/** Path supplied by Claude Code's `--settings` flag. */
+	readonly settingsPath?: string;
+	/** Override the managed-settings directory, mainly for tests. */
+	readonly managedSettingsRoot?: string;
+	/** Override all candidate managed-settings directories. */
+	readonly managedSettingsRoots?: ReadonlyArray<string>;
+}
+
+const defaultManagedSettingsRoots = [
+	'/Library/Application Support/ClaudeCode',
+	'/etc/claude-code',
+	'C:\\Program Files\\ClaudeCode'
+] as const;
+
 const readOptionalFile = (
 	path: string
 ): Effect.Effect<LoadedSource, SettingsReadError, FileSystem.FileSystem> =>
@@ -71,6 +91,24 @@ const readOptionalFile = (
 		return { path, content: Option.some(content) };
 	});
 
+const readDirectoryIfExists = (
+	path: string
+): Effect.Effect<
+	ReadonlyArray<string>,
+	SettingsReadError,
+	FileSystem.FileSystem
+> =>
+	Effect.gen(function* () {
+		const fs = yield* FileSystem.FileSystem;
+		const exists = yield* fs.exists(path).pipe(
+			Effect.mapError((cause) => new SettingsReadError({ path, cause }))
+		);
+		if (!exists) return [];
+		return yield* fs.readDirectory(path).pipe(
+			Effect.mapError((cause) => new SettingsReadError({ path, cause }))
+		);
+	});
+
 const decodeSettingsFile = (
 	path: string,
 	content: string
@@ -81,11 +119,17 @@ const decodeSettingsFile = (
 		)(content).pipe(
 			Effect.mapError((cause) => new SettingsParseError({ path, cause }))
 		);
-		return yield* Schema.decodeUnknownEffect(SettingsFile)(parsed).pipe(
+		const raw = yield* Schema.decodeUnknownEffect(SettingsRaw)(parsed).pipe(
 			Effect.mapError(
 				(cause) => new SettingsDecodeError({ path, cause })
 			)
 		);
+		const decoded = yield* Schema.decodeUnknownEffect(SettingsFile)(parsed).pipe(
+			Effect.mapError(
+				(cause) => new SettingsDecodeError({ path, cause })
+			)
+		);
+		return new SettingsFile({ ...decoded, raw });
 	});
 
 /** @internal */
@@ -199,6 +243,99 @@ const mergePermissions = (
 	);
 
 /** @internal */
+const mergeSandboxFilesystem = (
+	base: Option.Option<SandboxFilesystemConfig>,
+	override: Option.Option<SandboxFilesystemConfig>
+): Option.Option<SandboxFilesystemConfig> =>
+	mergeOptions(
+		base,
+		override,
+		(baseValue, overrideValue) =>
+			new SandboxFilesystemConfig({
+				...baseValue,
+				...overrideValue,
+				allowWrite: mergeOptionalStringArrays(
+					baseValue.allowWrite,
+					overrideValue.allowWrite
+				),
+				denyWrite: mergeOptionalStringArrays(
+					baseValue.denyWrite,
+					overrideValue.denyWrite
+				),
+				denyRead: mergeOptionalStringArrays(
+					baseValue.denyRead,
+					overrideValue.denyRead
+				),
+				allowRead: mergeOptionalStringArrays(
+					baseValue.allowRead,
+					overrideValue.allowRead
+				)
+			})
+	);
+
+/** @internal */
+const mergeSandboxNetwork = (
+	base: Option.Option<SandboxNetworkConfig>,
+	override: Option.Option<SandboxNetworkConfig>
+): Option.Option<SandboxNetworkConfig> =>
+	mergeOptions(
+		base,
+		override,
+		(baseValue, overrideValue) =>
+			new SandboxNetworkConfig({
+				...baseValue,
+				...overrideValue,
+				allowUnixSockets: mergeOptionalStringArrays(
+					baseValue.allowUnixSockets,
+					overrideValue.allowUnixSockets
+				),
+				allowMachLookup: mergeOptionalStringArrays(
+					baseValue.allowMachLookup,
+					overrideValue.allowMachLookup
+				),
+				allowedDomains: mergeOptionalStringArrays(
+					baseValue.allowedDomains,
+					overrideValue.allowedDomains
+				),
+				deniedDomains: mergeOptionalStringArrays(
+					baseValue.deniedDomains,
+					overrideValue.deniedDomains
+				)
+			})
+	);
+
+/** @internal */
+const mergeSandbox = (
+	base: Option.Option<SandboxConfig>,
+	override: Option.Option<SandboxConfig>
+): Option.Option<SandboxConfig> =>
+	mergeOptions(
+		base,
+		override,
+		(baseValue, overrideValue) =>
+			new SandboxConfig({
+				...baseValue,
+				...overrideValue,
+				excludedCommands: mergeOptionalStringArrays(
+					baseValue.excludedCommands,
+					overrideValue.excludedCommands
+				),
+				filesystem: Option.getOrUndefined(
+					mergeSandboxFilesystem(
+						Option.fromNullishOr(baseValue.filesystem),
+						Option.fromNullishOr(overrideValue.filesystem)
+					)
+				),
+				network: Option.getOrUndefined(
+					mergeSandboxNetwork(
+						Option.fromNullishOr(baseValue.network),
+						Option.fromNullishOr(overrideValue.network)
+					)
+				)
+			})
+	);
+
+/** @internal */
 const mergeHooks = (
 	base: SettingsFile['hooks'],
 	override: SettingsFile['hooks']
@@ -231,16 +368,31 @@ const mergeSettings = (
 	new SettingsFile({
 		...base,
 		...override,
+		raw: mergeOptionalRecords(base.raw, override.raw),
 		hooks: mergeHooks(base.hooks, override.hooks),
 		permissions: mergePermissions(base.permissions, override.permissions),
+		sandbox: Option.getOrUndefined(
+			mergeSandbox(
+				Option.fromNullishOr(base.sandbox),
+				Option.fromNullishOr(override.sandbox)
+			)
+		),
 		env: mergeOptionalRecords(base.env, override.env),
 		enabledPlugins: mergeOptionalRecords(
 			base.enabledPlugins,
 			override.enabledPlugins
 		),
+		pluginConfigs: mergeOptionalRecords(
+			base.pluginConfigs,
+			override.pluginConfigs
+		),
 		extraKnownMarketplaces: mergeOptionalRecords(
 			base.extraKnownMarketplaces,
 			override.extraKnownMarketplaces
+		),
+		availableModels: mergeOptionalStringArrays(
+			base.availableModels,
+			override.availableModels
 		),
 		allowedHttpHookUrls: mergeOptionalStringArrays(
 			base.allowedHttpHookUrls,
@@ -249,6 +401,18 @@ const mergeSettings = (
 		httpHookAllowedEnvVars: mergeOptionalStringArrays(
 			base.httpHookAllowedEnvVars,
 			override.httpHookAllowedEnvVars
+		),
+		spinnerTipsOverride: mergeOptionalStringArrays(
+			base.spinnerTipsOverride,
+			override.spinnerTipsOverride
+		),
+		spinnerVerbs: mergeOptionalStringArrays(
+			base.spinnerVerbs,
+			override.spinnerVerbs
+		),
+		companyAnnouncements: mergeOptionalStringArrays(
+			base.companyAnnouncements,
+			override.companyAnnouncements
 		)
 	});
 
@@ -298,6 +462,57 @@ export const localSettingsPath = (
 		return path.join(cwd, '.claude', 'settings.local.json');
 	});
 
+const managedRoots = (
+	options: Option.Option<LoadOptions>
+): ReadonlyArray<string> =>
+	Option.match(options, {
+		onNone: () => defaultManagedSettingsRoots,
+		onSome: (value) =>
+			Option.match(Option.fromNullishOr(value.managedSettingsRoots), {
+				onNone: () =>
+					Option.match(Option.fromNullishOr(value.managedSettingsRoot), {
+						onNone: () => defaultManagedSettingsRoots,
+						onSome: (root) => [root]
+					}),
+				onSome: (roots) => roots
+			})
+	});
+
+const managedSettingsSourcePaths = (
+	options: Option.Option<LoadOptions>
+): Effect.Effect<
+	ReadonlyArray<string>,
+	SettingsReadError,
+	FileSystem.FileSystem | Path.Path
+> =>
+	Effect.gen(function* () {
+		const path = yield* Path.Path;
+		const perRoot = yield* Effect.forEach(
+			managedRoots(options),
+			(root) =>
+				Effect.gen(function* () {
+					const basePath = path.join(root, 'managed-settings.json');
+					const dropInDir = path.join(root, 'managed-settings.d');
+					const entries = yield* readDirectoryIfExists(dropInDir);
+					const dropIns = Arr.map(
+						Arr.sort(
+							Arr.filter(
+								entries,
+								(entry) =>
+									!Str.startsWith('.')(entry) &&
+									Str.endsWith('.json')(entry)
+							),
+							Order.String
+						),
+						(entry) => path.join(dropInDir, entry)
+					);
+					return [basePath, ...dropIns];
+				}),
+			{ concurrency: 1 }
+		);
+		return Arr.flatten(perRoot);
+	});
+
 // ---------------------------------------------------------------------------
 // Loader
 // ---------------------------------------------------------------------------
@@ -310,6 +525,9 @@ export const localSettingsPath = (
  * 1. `~/.claude/settings.json` (user)
  * 2. `<cwd>/.claude/settings.json` (project)
  * 3. `<cwd>/.claude/settings.local.json` (local, usually gitignored)
+ * 4. `options.settingsPath` (`--settings` CLI overlay)
+ * 5. file-based managed settings (`managed-settings.json`, then sorted
+ *    `managed-settings.d/*.json` drop-ins)
  *
  * Files that don't exist are silently skipped. Parse or decode errors
  * propagate as `SettingsParseError` / `SettingsDecodeError`.
@@ -335,7 +553,8 @@ export const localSettingsPath = (
  * ```
  */
 export const load = (
-	cwd: string
+	cwd: string,
+	options?: LoadOptions
 ): Effect.Effect<
 	SettingsFile,
 	| Config.ConfigError
@@ -344,7 +563,10 @@ export const load = (
 	| SettingsDecodeError,
 	FileSystem.FileSystem | Path.Path
 > =>
-	Effect.fn('Settings.load')(function* (cwd: string) {
+	Effect.fn('Settings.load')(function* (
+		cwd: string,
+		loadOptions: Option.Option<LoadOptions>
+	) {
 		yield* Effect.annotateCurrentSpan('settings.cwd', cwd);
 		yield* Effect.logDebug('loading Claude Code settings').pipe(
 			Effect.annotateLogs({ cwd })
@@ -352,9 +574,20 @@ export const load = (
 		const userPath = yield* userSettingsPath;
 		const projectPath = yield* projectSettingsPath(cwd);
 		const localPath = yield* localSettingsPath(cwd);
+		const cliPath = Option.flatMap(loadOptions, (value) =>
+			Option.fromNullishOr(value.settingsPath)
+		);
+		const managedPaths = yield* managedSettingsSourcePaths(loadOptions);
+		const sourcePaths = [
+			userPath,
+			projectPath,
+			localPath,
+			...(Option.isSome(cliPath) ? [cliPath.value] : []),
+			...managedPaths
+		];
 
 		const sources = yield* Effect.forEach(
-			[userPath, projectPath, localPath],
+			sourcePaths,
 			readOptionalFile,
 			{ concurrency: 1 }
 		);
@@ -373,4 +606,4 @@ export const load = (
 		return Arr.reduce(decoded, emptySettings, (acc, maybe) =>
 			Option.isNone(maybe) ? acc : mergeSettings(acc, maybe.value)
 		);
-	})(cwd);
+	})(cwd, Option.fromNullishOr(options));

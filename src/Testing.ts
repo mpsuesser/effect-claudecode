@@ -210,7 +210,9 @@ export interface RunHookResult {
 	readonly stderr: string;
 	/**
 	 * Exit code the runner would produce under the real `runMain` teardown.
-	 * `0` success, `2` blocking decode error, `1` other failure, `130` interrupt.
+	 * `0` success, handler-authored `HookProcessOutput` exits use their
+	 * requested code, `2` input decode failure, `1` other runner failure,
+	 * `130` interrupt.
 	 */
 	readonly exitCode: number;
 	/** The `_tag` of the runner failure, if any. */
@@ -630,8 +632,11 @@ export const expectAskDecision = (
  * Assert that `output` is a top-level `block` decision. If `reason`
  * is provided, it must match `reason`.
  *
- * Applies to UserPromptSubmit, PostToolUse, Stop, SubagentStop,
- * ConfigChange, TaskCreated, TaskCompleted, and TeammateIdle.
+ * Applies to events that encode a top-level JSON `decision: "block"`, such
+ * as UserPromptSubmit, PostToolUse, PostToolUseFailure, PostToolBatch, Stop,
+ * SubagentStop, ConfigChange, UserPromptExpansion, and PreCompact. Events
+ * that block with a controlled exit (TaskCreated, TaskCompleted,
+ * TeammateIdle, WorktreeCreate) should assert on `exitCode` and `stderr`.
  *
  * @category Assertions
  * @since 0.1.0

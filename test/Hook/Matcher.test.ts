@@ -6,7 +6,7 @@
  */
 import { describe, expect, test } from '@effect/vitest';
 
-import { matchTool, testTool } from '../../src/Hook/Matcher.ts';
+import { matchFileName, matchTool, testTool } from '../../src/Hook/Matcher.ts';
 
 describe('Hook.matchTool', () => {
 	test('plain matcher values are exact matches', () => {
@@ -49,5 +49,14 @@ describe('Hook.matchTool', () => {
 	test('testTool is a one-shot form', () => {
 		expect(testTool('Bash', 'Bash')).toBe(true);
 		expect(testTool('Bash', 'Read')).toBe(false);
+	});
+});
+
+describe('Hook.matchFileName', () => {
+	test('treats pipe-separated filenames as literal basenames', () => {
+		const matches = matchFileName('.envrc|.env');
+		expect(matches('.envrc')).toBe(true);
+		expect(matches('.env')).toBe(true);
+		expect(matches('xenvrc')).toBe(false);
 	});
 });

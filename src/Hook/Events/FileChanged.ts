@@ -80,11 +80,8 @@ export const onMatcher = (config: {
 	) => Effect.Effect<Output, unknown, HookContext.Service>;
 }): HookDefinition<Input, Output> =>
 	define({
-		handler: Matcher.handleMatcher({
-			matcher: config.matcher,
-			select: (input) => fileBasename(input.file_path),
-			onMatch: config.handler,
-			onMismatch:
-				config.onMismatch ?? (() => Effect.succeed(passthrough()))
-		})
+		handler: (input) =>
+			Matcher.matchFileName(config.matcher)(fileBasename(input.file_path))
+				? config.handler(input)
+				: (config.onMismatch ?? (() => Effect.succeed(passthrough())))(input)
 	});

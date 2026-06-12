@@ -20,8 +20,7 @@ export const MemoryType = Schema.Literals([
 	'User',
 	'Project',
 	'Local',
-	'Managed',
-	'Nested'
+	'Managed'
 ] as const);
 
 export const LoadReason = Schema.Literals([

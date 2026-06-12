@@ -96,6 +96,27 @@ export const handleMatcher = <I, O, E, R>(config: {
 export const matchTool = matchValue;
 
 /**
+ * Compile a FileChanged matcher into a tester. Claude Code splits
+ * FileChanged matcher strings on `|` and treats each segment as a literal
+ * basename rather than a regular expression. `*` and `""` still match all.
+ *
+ * @category Matcher
+ * @since 0.1.0
+ */
+export const matchFileName = (
+	pattern: string | RegExp
+): ((name: string) => boolean) => {
+	if (pattern instanceof RegExp) {
+		return (name: string) => pattern.test(name);
+	}
+	if (pattern === '*' || Str.isEmpty(pattern)) {
+		return () => true;
+	}
+	const exactValues = Str.split(pattern, '|');
+	return (name: string) => Arr.contains(exactValues, name);
+};
+
+/**
  * Test whether a regex pattern matches a tool name, one-shot.
  *
  * @category Matcher

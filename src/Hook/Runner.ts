@@ -346,10 +346,11 @@ export const runDispatchProgram = (
  * hook exit-code convention:
  *
  * - `0` success
- * - `2` blocking error (currently only `HookInputDecodeError` — Claude Code
- *   halts the pending action)
- * - `1` non-blocking error (everything else — stdin read, handler crash,
- *   encode, write)
+ * - handler-authored `HookProcessOutput` exits use their requested code
+ * - `2` for `HookInputDecodeError` (Claude Code interprets exit 2 per
+ *   event: blocking for PreToolUse, PermissionRequest, ConfigChange, etc.;
+ *   feedback-only or ignored for several observability events)
+ * - `1` non-blocking runner error (stdin read, handler crash, encode, write)
  * - `130` fiber interruption (SIGINT-style)
  *
  * @category Runner

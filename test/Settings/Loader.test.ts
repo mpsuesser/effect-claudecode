@@ -9,18 +9,23 @@
  * @since 0.1.0
  */
 import { describe, expect, it } from '@effect/vitest';
+import * as Arr from 'effect/Array';
 import * as ConfigProvider from 'effect/ConfigProvider';
 import * as Effect from 'effect/Effect';
 import * as FileSystem from 'effect/FileSystem';
 import * as Layer from 'effect/Layer';
+import * as Option from 'effect/Option';
 import * as Path from 'effect/Path';
 import * as PlatformError from 'effect/PlatformError';
+import * as Schema from 'effect/Schema';
+import * as Str from 'effect/String';
 
 import {
 	SettingsDecodeError,
 	SettingsParseError
 } from '../../src/Errors.ts';
 import * as Loader from '../../src/Settings/Loader.ts';
+import { SettingsRaw } from '../../src/Settings/Schema.ts';
 
 // ---------------------------------------------------------------------------
 // Test constants
@@ -32,6 +37,10 @@ const CWD = '/repo';
 const USER_PATH = `${HOME}/.claude/settings.json`;
 const PROJECT_PATH = `${CWD}/.claude/settings.json`;
 const LOCAL_PATH = `${CWD}/.claude/settings.local.json`;
+const CLI_PATH = '/tmp/cli-settings.json';
+const MANAGED_ROOT = '/managed/ClaudeCode';
+const MANAGED_PATH = `${MANAGED_ROOT}/managed-settings.json`;
+const MANAGED_DROP_IN_PATH = `${MANAGED_ROOT}/managed-settings.d/20-security.json`;
 
 // ---------------------------------------------------------------------------
 // Test layer builders
@@ -46,6 +55,21 @@ const notFoundError = (path: string) =>
 		pathOrDescriptor: path
 	});
 
+const directoryEntries = (
+	files: ReadonlyMap<string, string>,
+	directory: string
+): Array<string> => {
+	const prefix = `${directory}/`;
+	const entries = Arr.map(
+		Arr.filter(
+			Arr.fromIterable(files.keys()),
+			(path) => Str.startsWith(prefix)(path)
+		),
+		Str.replace(prefix, '')
+	);
+	return Arr.filter(entries, (entry) => !Str.includes('/')(entry));
+};
+
 /**
  * Build a `FileSystem` layer that serves files from the given map. Paths
  * not in the map are reported as non-existent.
@@ -54,13 +78,18 @@ const makeFileSystemLayer = (
 	files: ReadonlyMap<string, string>
 ): Layer.Layer<FileSystem.FileSystem> =>
 	FileSystem.layerNoop({
-		exists: (path: string) => Effect.succeed(files.has(path)),
-		readFileString: (path: string) => {
-			const content = files.get(path);
-			return content === undefined
-				? Effect.fail(notFoundError(path))
-				: Effect.succeed(content);
-		}
+		exists: (path: string) =>
+			Effect.succeed(
+				files.has(path) ||
+					Arr.isReadonlyArrayNonEmpty(directoryEntries(files, path))
+			),
+		readDirectory: (path: string) =>
+			Effect.succeed(directoryEntries(files, path)),
+		readFileString: (path: string) =>
+			Option.match(Option.fromNullishOr(files.get(path)), {
+				onNone: () => Effect.fail(notFoundError(path)),
+				onSome: Effect.succeed
+			})
 	});
 
 /**
@@ -79,6 +108,10 @@ const makeTestLayer = (
 const fsWith = (
 	entries: ReadonlyArray<readonly [string, string]>
 ): ReadonlyMap<string, string> => new Map(entries);
+
+const SettingsJson = Schema.fromJsonString(SettingsRaw);
+
+const settingsJson = Schema.encodeSync(SettingsJson);
 
 // ---------------------------------------------------------------------------
 // Path resolution
@@ -130,7 +163,7 @@ describe('Settings.load — single scope', () => {
 					fsWith([
 						[
 							USER_PATH,
-							JSON.stringify({
+							settingsJson({
 								model: 'claude-opus-4-6',
 								includeCoAuthoredBy: false
 							})
@@ -145,7 +178,7 @@ describe('Settings.load — single scope', () => {
 		() =>
 			Effect.gen(function* () {
 				const settings = yield* Loader.load(CWD);
-				expect(settings.theme).toBe('dark');
+				expect(settings.language).toBe('en-US');
 				expect(settings.fastMode).toBe(true);
 			}).pipe(
 				Effect.provide(
@@ -153,8 +186,8 @@ describe('Settings.load — single scope', () => {
 						fsWith([
 							[
 								PROJECT_PATH,
-								JSON.stringify({
-									theme: 'dark',
+								settingsJson({
+									language: 'en-US',
 									fastMode: true
 								})
 							]
@@ -170,7 +203,7 @@ describe('Settings.load — single scope', () => {
 		}).pipe(
 			Effect.provide(
 				makeTestLayer(
-					fsWith([[LOCAL_PATH, JSON.stringify({ agent: 'planner' })]])
+					fsWith([[LOCAL_PATH, settingsJson({ agent: 'planner' })]])
 				)
 			)
 		));
@@ -189,7 +222,7 @@ describe('Settings.load — merging', () => {
 				const settings = yield* Loader.load(CWD);
 				expect(settings).toMatchObject({
 					model: 'claude-sonnet-4-6', // project wins
-					theme: 'dark', // user-only key survives
+					language: 'en-US', // user-only key survives
 					fastMode: true // project-only key survives
 				});
 			}).pipe(
@@ -198,14 +231,14 @@ describe('Settings.load — merging', () => {
 						fsWith([
 							[
 								USER_PATH,
-								JSON.stringify({
+								settingsJson({
 									model: 'claude-opus-4-6',
-									theme: 'dark'
+									language: 'en-US'
 								})
 							],
 							[
 								PROJECT_PATH,
-								JSON.stringify({
+								settingsJson({
 									model: 'claude-sonnet-4-6',
 									fastMode: true
 								})
@@ -223,9 +256,73 @@ describe('Settings.load — merging', () => {
 			Effect.provide(
 				makeTestLayer(
 					fsWith([
-						[USER_PATH, JSON.stringify({ model: 'claude-opus-4-6' })],
-						[PROJECT_PATH, JSON.stringify({ model: 'claude-sonnet-4-6' })],
-						[LOCAL_PATH, JSON.stringify({ model: 'claude-haiku-4-5' })]
+						[USER_PATH, settingsJson({ model: 'claude-opus-4-6' })],
+						[PROJECT_PATH, settingsJson({ model: 'claude-sonnet-4-6' })],
+						[LOCAL_PATH, settingsJson({ model: 'claude-haiku-4-5' })]
+					])
+				)
+			)
+		));
+
+	it.effect('CLI settings override local settings', () =>
+		Effect.gen(function* () {
+			const settings = yield* Loader.load(CWD, { settingsPath: CLI_PATH });
+			expect(settings.model).toBe('claude-opus-4-6');
+			expect(settings.language).toBe('en-US');
+		}).pipe(
+			Effect.provide(
+				makeTestLayer(
+					fsWith([
+						[
+							LOCAL_PATH,
+							settingsJson({
+								model: 'claude-haiku-4-5',
+								language: 'en-US'
+							})
+						],
+						[CLI_PATH, settingsJson({ model: 'claude-opus-4-6' })]
+					])
+				)
+			)
+		));
+
+	it.effect('managed settings override CLI settings and merge drop-ins', () =>
+		Effect.gen(function* () {
+			const settings = yield* Loader.load(CWD, {
+				settingsPath: CLI_PATH,
+				managedSettingsRoot: MANAGED_ROOT
+			});
+			expect(settings.model).toBe('claude-sonnet-4-6');
+			expect(settings.allowedHttpHookUrls).toEqual([
+				'https://cli.example',
+				'https://managed.example',
+				'https://drop.example'
+			]);
+		}).pipe(
+			Effect.provide(
+				makeTestLayer(
+					fsWith([
+						[
+							CLI_PATH,
+							settingsJson({
+								model: 'claude-haiku-4-5',
+								allowedHttpHookUrls: ['https://cli.example']
+							})
+						],
+						[
+							MANAGED_PATH,
+							settingsJson({
+								model: 'claude-opus-4-6',
+								allowedHttpHookUrls: ['https://managed.example']
+							})
+						],
+						[
+							MANAGED_DROP_IN_PATH,
+							settingsJson({
+								model: 'claude-sonnet-4-6',
+								allowedHttpHookUrls: ['https://drop.example']
+							})
+						]
 					])
 				)
 			)
@@ -291,7 +388,7 @@ describe('Settings.load — complex structures', () => {
 					fsWith([
 						[
 							PROJECT_PATH,
-							JSON.stringify({
+							settingsJson({
 								hooks: {
 									PreToolUse: [
 										{
@@ -329,7 +426,7 @@ describe('Settings.load — complex structures', () => {
 					fsWith([
 						[
 							USER_PATH,
-							JSON.stringify({
+							settingsJson({
 								mcpServers: {
 									filesystem: {
 										type: 'stdio',
@@ -363,7 +460,7 @@ describe('Settings.load — complex structures', () => {
 					fsWith([
 						[
 							PROJECT_PATH,
-							JSON.stringify({
+							settingsJson({
 								statusLine: {
 									type: 'command',
 									command: 'bun status.ts',
@@ -413,7 +510,7 @@ describe('Settings.load — errors', () => {
 						[
 							PROJECT_PATH,
 							// `model` must be a string, not a number
-							JSON.stringify({ model: 123 })
+							settingsJson({ model: 123 })
 						]
 					])
 				)
@@ -434,7 +531,7 @@ describe('Settings.load — errors', () => {
 			Effect.provide(
 				makeTestLayer(
 					fsWith([
-						[USER_PATH, JSON.stringify({ model: 'claude-opus-4-6' })],
+						[USER_PATH, settingsJson({ model: 'claude-opus-4-6' })],
 						[LOCAL_PATH, '{ not valid']
 					])
 				)

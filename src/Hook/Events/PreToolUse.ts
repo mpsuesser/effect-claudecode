@@ -202,11 +202,11 @@ export const allowWithUpdatedInput = (
  *
  * const hook = Hook.PreToolUse.define({
  *   handler: (input) => Effect.gen(function* () {
- *     if (input.tool_name !== 'Bash') return Hook.PreToolUse.allow()
+ *     if (input.tool_name !== 'Bash') return Hook.PreToolUse.passthrough()
  *     const cmd = (input.tool_input as { command?: string }).command ?? ''
  *     return cmd.includes('rm -rf /')
  *       ? Hook.PreToolUse.deny('destructive')
- *       : Hook.PreToolUse.allow()
+ *       : Hook.PreToolUse.passthrough()
  *   })
  * })
  *
