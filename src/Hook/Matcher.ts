@@ -1,9 +1,11 @@
 /**
  * Matcher helpers for hooks that support a `matcher` field in settings.json.
  *
- * Claude Code's matcher strings are regex. These helpers compile and test
- * them so individual hooks can branch on whether the incoming event
- * matches. They are NOT required — the `matcher` field in settings.json
+ * Claude Code matcher strings are exact/pipe-list matchers for plain
+ * tokens, match-all for `*` or the empty string, and JavaScript regular
+ * expressions only when they contain other characters. These helpers mirror
+ * those semantics so individual hooks can branch on whether the incoming
+ * event matches. They are NOT required — the `matcher` field in settings.json
  * filters hooks at Claude Code's side before the process is even spawned.
  * Use these when you dispatch many events from one script and need to
  * branch within a single handler.
@@ -13,14 +15,20 @@
 
 import type * as Effect from 'effect/Effect';
 
+import * as Arr from 'effect/Array';
+import * as Str from 'effect/String';
+
 // ---------------------------------------------------------------------------
 // Matchers
 // ---------------------------------------------------------------------------
 
+const exactMatcherPattern = /^[A-Za-z0-9_|]+$/;
+
 /**
- * Compile a matcher pattern into a tester function. Accepts either a
- * regex pattern string (matched with `^pattern$` anchoring) or a full
- * `RegExp`.
+ * Compile a matcher pattern into a tester function. String patterns follow
+ * Claude Code's current matcher rules: `*` and `""` match all, strings made
+ * only from letters/digits/`_`/`|` are exact values or `|`-separated exact
+ * lists, and strings containing any other character are JavaScript regexes.
  *
  * @category Matcher
  * @since 0.1.0
@@ -33,13 +41,24 @@ import type * as Effect from 'effect/Effect';
  * const isMcp = Hook.matchTool('mcp__.*')
  *
  * isBash('Bash')       // true
- * isBash('Bash(git)')  // false — anchored match
+ * isBash('Bash(git)')  // false — exact match
  * isMcp('mcp__foo')    // true
  * ```
  */
-export const matchValue = (pattern: string | RegExp): ((name: string) => boolean) => {
-	const regex =
-		pattern instanceof RegExp ? pattern : new RegExp(`^(?:${pattern})$`);
+export const matchValue = (
+	pattern: string | RegExp
+): ((name: string) => boolean) => {
+	if (pattern instanceof RegExp) {
+		return (name: string) => pattern.test(name);
+	}
+	if (pattern === '*' || Str.isEmpty(pattern)) {
+		return () => true;
+	}
+	if (exactMatcherPattern.test(pattern)) {
+		const exactValues = Str.split(pattern, '|');
+		return (name: string) => Arr.contains(exactValues, name);
+	}
+	const regex = new RegExp(pattern);
 	return (name: string) => regex.test(name);
 };
 

@@ -18,8 +18,8 @@
  * }
  * ```
  *
- * Claude Code supports four hook types: `command`, `http`, `prompt`, and
- * `agent`. This module schematizes all four.
+ * Claude Code supports five hook types: `command`, `http`, `mcp_tool`,
+ * `prompt`, and `agent`. This module schematizes all five.
  *
  * @since 0.1.0
  */
@@ -29,49 +29,68 @@ import * as Schema from 'effect/Schema';
 // Hook entry types
 // ---------------------------------------------------------------------------
 
+const commonHookFields = {
+	if: Schema.optional(Schema.String),
+	timeout: Schema.optional(Schema.Number),
+	statusMessage: Schema.optional(Schema.String),
+	once: Schema.optional(Schema.Boolean)
+} as const;
+
 export class CommandHookEntry extends Schema.Class<CommandHookEntry>(
 	'CommandHookEntry'
 )({
+	...commonHookFields,
 	type: Schema.Literal('command'),
 	command: Schema.String,
-	timeout: Schema.optional(Schema.Number),
+	args: Schema.optional(Schema.Array(Schema.String)),
 	async: Schema.optional(Schema.Boolean),
-	shell: Schema.optional(Schema.Literals(['bash', 'powershell'] as const)),
-	statusMessage: Schema.optional(Schema.String),
-	once: Schema.optional(Schema.Boolean)
+	asyncRewake: Schema.optional(Schema.Boolean),
+	shell: Schema.optional(Schema.Literals(['bash', 'powershell'] as const))
 }) {}
 
 export class HttpHookEntry extends Schema.Class<HttpHookEntry>(
 	'HttpHookEntry'
 )({
+	...commonHookFields,
 	type: Schema.Literal('http'),
 	url: Schema.String,
 	headers: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-	allowedEnvVars: Schema.optional(Schema.Array(Schema.String)),
-	timeout: Schema.optional(Schema.Number)
+	allowedEnvVars: Schema.optional(Schema.Array(Schema.String))
+}) {}
+
+export class McpToolHookEntry extends Schema.Class<McpToolHookEntry>(
+	'McpToolHookEntry'
+)({
+	...commonHookFields,
+	type: Schema.Literal('mcp_tool'),
+	server: Schema.String,
+	tool: Schema.String,
+	input: Schema.optional(Schema.Record(Schema.String, Schema.Unknown))
 }) {}
 
 export class PromptHookEntry extends Schema.Class<PromptHookEntry>(
 	'PromptHookEntry'
 )({
+	...commonHookFields,
 	type: Schema.Literal('prompt'),
 	prompt: Schema.String,
 	model: Schema.optional(Schema.String),
-	timeout: Schema.optional(Schema.Number)
+	continueOnBlock: Schema.optional(Schema.Boolean)
 }) {}
 
 export class AgentHookEntry extends Schema.Class<AgentHookEntry>(
 	'AgentHookEntry'
 )({
+	...commonHookFields,
 	type: Schema.Literal('agent'),
 	prompt: Schema.String,
 	model: Schema.optional(Schema.String),
-	timeout: Schema.optional(Schema.Number)
+	continueOnBlock: Schema.optional(Schema.Boolean)
 }) {}
 
 /**
  * A single hook entry in settings.json — a discriminated union of the
- * four supported types keyed on `type`.
+ * five supported types keyed on `type`.
  *
  * @category Schemas
  * @since 0.1.0
@@ -79,6 +98,7 @@ export class AgentHookEntry extends Schema.Class<AgentHookEntry>(
 export const HookEntry = Schema.Union([
 	CommandHookEntry,
 	HttpHookEntry,
+	McpToolHookEntry,
 	PromptHookEntry,
 	AgentHookEntry
 ]).annotate({ identifier: 'HookEntry' });
@@ -90,8 +110,7 @@ export type HookEntry = Schema.Schema.Type<typeof HookEntry>;
 // ---------------------------------------------------------------------------
 
 /**
- * A group of hook entries sharing a common matcher (and optional
- * permission filter).
+ * A group of hook entries sharing a common matcher.
  *
  * @category Schemas
  * @since 0.1.0
@@ -100,8 +119,7 @@ export class HookMatcherGroup extends Schema.Class<HookMatcherGroup>(
 	'HookMatcherGroup'
 )({
 	matcher: Schema.optional(Schema.String),
-	hooks: Schema.Array(HookEntry),
-	if: Schema.optional(Schema.String)
+	hooks: Schema.Array(HookEntry)
 }) {}
 
 // ---------------------------------------------------------------------------

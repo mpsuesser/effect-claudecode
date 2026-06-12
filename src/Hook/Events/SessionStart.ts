@@ -33,7 +33,8 @@ export class Input extends Schema.Class<Input>('SessionStartInput')(
 		hook_event_name: Schema.Literal('SessionStart'),
 		source: Source,
 		model: Schema.optional(Schema.String),
-		agent_type: Schema.optional(Schema.String)
+		agent_type: Schema.optionalKey(Schema.String),
+		session_title: Schema.optional(Schema.String)
 	},
 	{ description: 'Input for the SessionStart hook event.' }
 ) {}
@@ -46,7 +47,11 @@ export class HookSpecificOutput extends Schema.Class<HookSpecificOutput>(
 	'SessionStartHookSpecificOutput'
 )({
 	hookEventName: Schema.Literal('SessionStart'),
-	additionalContext: Schema.optional(Schema.String)
+	additionalContext: Schema.optional(Schema.String),
+	initialUserMessage: Schema.optional(Schema.String),
+	sessionTitle: Schema.optional(Schema.String),
+	watchPaths: Schema.optional(Schema.Array(Schema.String)),
+	reloadSkills: Schema.optional(Schema.Boolean)
 }) {}
 
 export class Output extends Schema.Class<Output>('SessionStartOutput')({
@@ -54,6 +59,7 @@ export class Output extends Schema.Class<Output>('SessionStartOutput')({
 	stopReason: Schema.optional(Schema.String),
 	suppressOutput: Schema.optional(Schema.Boolean),
 	systemMessage: Schema.optional(Schema.String),
+	terminalSequence: Schema.optional(Schema.String),
 	hookSpecificOutput: Schema.optional(HookSpecificOutput)
 }) {}
 
@@ -76,6 +82,42 @@ export const addContext = (additionalContext: string): Output =>
 		hookSpecificOutput: new HookSpecificOutput({
 			hookEventName: 'SessionStart',
 			additionalContext
+		})
+	});
+
+export const startWithMessage = (initialUserMessage: string): Output =>
+	new Output({
+		hookSpecificOutput: new HookSpecificOutput({
+			hookEventName: 'SessionStart',
+			initialUserMessage
+		})
+	});
+
+export const renameSession = (sessionTitle: string): Output =>
+	new Output({
+		hookSpecificOutput: new HookSpecificOutput({
+			hookEventName: 'SessionStart',
+			sessionTitle
+		})
+	});
+
+export const watchPaths = (
+	paths: ReadonlyArray<string>,
+	options?: { readonly reloadSkills?: boolean }
+): Output =>
+	new Output({
+		hookSpecificOutput: new HookSpecificOutput({
+			hookEventName: 'SessionStart',
+			watchPaths: paths,
+			reloadSkills: options?.reloadSkills
+		})
+	});
+
+export const reloadSkills = (): Output =>
+	new Output({
+		hookSpecificOutput: new HookSpecificOutput({
+			hookEventName: 'SessionStart',
+			reloadSkills: true
 		})
 	});
 

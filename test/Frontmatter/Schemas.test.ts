@@ -96,10 +96,11 @@ describe('SkillFrontmatter', () => {
 		})
 	);
 
-	it.effect('rejects a skill missing the required description field', () =>
+	it.effect('decodes a skill without description', () =>
 		Effect.gen(function* () {
-			const error = yield* Effect.flip(decodeSkill({ name: 's' }));
-			expect(error).toBeInstanceOf(Schema.SchemaError);
+			const skill = yield* decodeSkill({ name: 's' });
+			expect(skill.name).toBe('s');
+			expect(skill.description).toBeUndefined();
 		})
 	);
 });
@@ -226,10 +227,11 @@ describe('OutputStyleFrontmatter', () => {
 		})
 	);
 
-	it.effect('rejects a style missing the required name field', () =>
+	it.effect('decodes an empty style frontmatter', () =>
 		Effect.gen(function* () {
-			const error = yield* Effect.flip(decodeOutputStyle({}));
-			expect(error).toBeInstanceOf(Schema.SchemaError);
+			const style = yield* decodeOutputStyle({});
+			expect(style.name).toBeUndefined();
+			expect(style.description).toBeUndefined();
 		})
 	);
 });

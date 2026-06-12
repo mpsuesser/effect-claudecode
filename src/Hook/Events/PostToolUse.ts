@@ -29,7 +29,8 @@ export class Input extends Schema.Class<Input>('PostToolUseInput')(
 		tool_name: Schema.String,
 		tool_input: Schema.Record(Schema.String, Schema.Unknown),
 		tool_response: Schema.Record(Schema.String, Schema.Unknown),
-		tool_use_id: Schema.optional(Schema.String)
+		tool_use_id: Schema.optional(Schema.String),
+		duration_ms: Schema.optional(Schema.Number)
 	},
 	{ description: 'Input for the PostToolUse hook event.' }
 ) {}
@@ -43,6 +44,7 @@ export class HookSpecificOutput extends Schema.Class<HookSpecificOutput>(
 )({
 	hookEventName: Schema.Literal('PostToolUse'),
 	additionalContext: Schema.optional(Schema.String),
+	updatedToolOutput: Schema.optional(Schema.Unknown),
 	updatedMCPToolOutput: Schema.optional(Schema.Unknown)
 }) {}
 
@@ -53,6 +55,7 @@ export class Output extends Schema.Class<Output>('PostToolUseOutput')({
 	stopReason: Schema.optional(Schema.String),
 	suppressOutput: Schema.optional(Schema.Boolean),
 	systemMessage: Schema.optional(Schema.String),
+	terminalSequence: Schema.optional(Schema.String),
 	hookSpecificOutput: Schema.optional(HookSpecificOutput)
 }) {}
 
@@ -98,6 +101,18 @@ export const addContext = (additionalContext: string): Output =>
  * @category Decisions
  * @since 0.1.0
  */
+export const replaceOutput = (
+	updatedToolOutput: unknown,
+	additionalContext?: string
+): Output =>
+	new Output({
+		hookSpecificOutput: new HookSpecificOutput({
+			hookEventName: 'PostToolUse',
+			additionalContext,
+			updatedToolOutput
+		})
+	});
+
 export const replaceMcpOutput = (
 	updatedMCPToolOutput: unknown,
 	additionalContext?: string
@@ -132,10 +147,10 @@ export const define = (config: {
  * @category Constructors
  * @since 0.1.0
  */
-type BashOnToolConfig = {
-	readonly toolName: 'Bash';
+export type OnToolConfig<T extends Tool.SupportedToolName> = {
+	readonly toolName: T;
 	readonly handler: (
-		input: Tool.DecodedPostToolUse<'Bash'>
+		input: Tool.DecodedPostToolUse<T>
 	) => Effect.Effect<Output, unknown, HookContext.Service>;
 	readonly onMismatch?: (
 		input: Input
@@ -146,50 +161,24 @@ type BashOnToolConfig = {
 	) => Effect.Effect<Output, unknown, HookContext.Service>;
 };
 
-type ReadOnToolConfig = {
-	readonly toolName: 'Read';
-	readonly handler: (
-		input: Tool.DecodedPostToolUse<'Read'>
-	) => Effect.Effect<Output, unknown, HookContext.Service>;
-	readonly onMismatch?: (
-		input: Input
-	) => Effect.Effect<Output, unknown, HookContext.Service>;
-	readonly onDecodeError?: (
-		error: HookToolDecodeError,
-		input: Input
-	) => Effect.Effect<Output, unknown, HookContext.Service>;
-};
-
-type OnToolConfig = BashOnToolConfig | ReadOnToolConfig;
-
-export function onTool(config: BashOnToolConfig): HookDefinition<Input, Output>;
-export function onTool(config: ReadOnToolConfig): HookDefinition<Input, Output>;
-export function onTool(config: OnToolConfig): HookDefinition<Input, Output> {
-	return define({
+export const onTool = <const T extends Tool.SupportedToolName>(
+	config: OnToolConfig<T>
+): HookDefinition<Input, Output> =>
+	define({
 		handler: (input): Effect.Effect<Output, unknown, HookContext.Service> => {
 			if (input.tool_name !== config.toolName) {
 				return config.onMismatch?.(input) ?? Effect.succeed(passthrough());
 			}
-			return config.toolName === 'Bash'
-				? Tool.decodePostToolUse('Bash', input).pipe(
-						Effect.flatMap(config.handler),
-						Effect.catch((error) =>
-							error instanceof HookToolDecodeError
-								? config.onDecodeError?.(error, input) ?? Effect.fail(error)
-								: Effect.fail(error)
-						)
-				  )
-				: Tool.decodePostToolUse('Read', input).pipe(
-						Effect.flatMap(config.handler),
-						Effect.catch((error) =>
-							error instanceof HookToolDecodeError
-								? config.onDecodeError?.(error, input) ?? Effect.fail(error)
-								: Effect.fail(error)
-						)
-				  );
+			return Tool.decodePostToolUse(config.toolName, input).pipe(
+				Effect.flatMap(config.handler),
+				Effect.catch((error) =>
+					error instanceof HookToolDecodeError
+						? config.onDecodeError?.(error, input) ?? Effect.fail(error)
+						: Effect.fail(error)
+				)
+			);
 		}
 	});
-}
 
 /**
  * Build a PostToolUse hook that only handles matching `tool_name` values.

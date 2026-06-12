@@ -43,10 +43,12 @@ export class HookSpecificOutput extends Schema.Class<HookSpecificOutput>(
 export class Output extends Schema.Class<Output>('UserPromptSubmitOutput')({
 	decision: Schema.optional(Schema.Literal('block')),
 	reason: Schema.optional(Schema.String),
+	suppressOriginalPrompt: Schema.optional(Schema.Boolean),
 	continue: Schema.optional(Schema.Boolean),
 	stopReason: Schema.optional(Schema.String),
 	suppressOutput: Schema.optional(Schema.Boolean),
 	systemMessage: Schema.optional(Schema.String),
+	terminalSequence: Schema.optional(Schema.String),
 	hookSpecificOutput: Schema.optional(HookSpecificOutput)
 }) {}
 
@@ -69,8 +71,15 @@ export const allow = (): Output => new Output({ continue: undefined });
  * @category Decisions
  * @since 0.1.0
  */
-export const block = (reason: string): Output =>
-	new Output({ decision: 'block', reason });
+export const block = (
+	reason: string,
+	options?: { readonly suppressOriginalPrompt?: boolean }
+): Output =>
+	new Output({
+		decision: 'block',
+		reason,
+		suppressOriginalPrompt: options?.suppressOriginalPrompt
+	});
 
 /**
  * Allow the prompt and inject additional context Claude will see.

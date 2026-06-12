@@ -1,12 +1,9 @@
 /**
- * ConfigChange hook event.
+ * UserPromptExpansion hook event.
  *
- * Fires when a Claude Code configuration file changes during a session
- * (user/project/local settings, policy settings, or skills). A handler
- * can return `decision: "block"` to prevent the config change from taking
- * effect — except `policy_settings` changes, which cannot be blocked.
- * Supports a matcher on `source`.
- * See https://code.claude.com/docs/en/hooks#configchange.
+ * Fires when a user-typed slash command expands into a prompt before it
+ * reaches Claude. Supports a matcher on `command_name`.
+ * See https://code.claude.com/docs/en/hooks#userpromptexpansion.
  *
  * @since 0.1.0
  */
@@ -18,32 +15,40 @@ import { envelopeFields } from '../Envelope.ts';
 import * as Matcher from '../Matcher.ts';
 import type { HookDefinition } from '../Runner.ts';
 
-export const ConfigSource = Schema.Literals([
-	'user_settings',
-	'project_settings',
-	'local_settings',
-	'policy_settings',
-	'skills'
+export const ExpansionType = Schema.Literals([
+	'slash_command',
+	'mcp_prompt'
 ] as const);
 
-export class Input extends Schema.Class<Input>('ConfigChangeInput')(
+export class Input extends Schema.Class<Input>('UserPromptExpansionInput')(
 	{
 		...envelopeFields,
-		hook_event_name: Schema.Literal('ConfigChange'),
-		source: ConfigSource,
-		file_path: Schema.optional(Schema.String)
+		hook_event_name: Schema.Literal('UserPromptExpansion'),
+		expansion_type: ExpansionType,
+		command_name: Schema.String,
+		command_args: Schema.String,
+		command_source: Schema.String,
+		prompt: Schema.String
 	},
-	{ description: 'Input for the ConfigChange hook event.' }
+	{ description: 'Input for the UserPromptExpansion hook event.' }
 ) {}
 
-export class Output extends Schema.Class<Output>('ConfigChangeOutput')({
+export class HookSpecificOutput extends Schema.Class<HookSpecificOutput>(
+	'UserPromptExpansionHookSpecificOutput'
+)({
+	hookEventName: Schema.Literal('UserPromptExpansion'),
+	additionalContext: Schema.optional(Schema.String)
+}) {}
+
+export class Output extends Schema.Class<Output>('UserPromptExpansionOutput')({
 	decision: Schema.optional(Schema.Literal('block')),
 	reason: Schema.optional(Schema.String),
 	continue: Schema.optional(Schema.Boolean),
 	stopReason: Schema.optional(Schema.String),
 	suppressOutput: Schema.optional(Schema.Boolean),
 	systemMessage: Schema.optional(Schema.String),
-	terminalSequence: Schema.optional(Schema.String)
+	terminalSequence: Schema.optional(Schema.String),
+	hookSpecificOutput: Schema.optional(HookSpecificOutput)
 }) {}
 
 export const allow = (): Output => new Output({ continue: undefined });
@@ -51,23 +56,25 @@ export const allow = (): Output => new Output({ continue: undefined });
 export const block = (reason: string): Output =>
 	new Output({ decision: 'block', reason });
 
+export const addContext = (additionalContext: string): Output =>
+	new Output({
+		hookSpecificOutput: new HookSpecificOutput({
+			hookEventName: 'UserPromptExpansion',
+			additionalContext
+		})
+	});
+
 export const define = (config: {
 	readonly handler: (
 		input: Input
 	) => Effect.Effect<Output, unknown, HookContext.Service>;
 }): HookDefinition<Input, Output> => ({
-	event: 'ConfigChange',
+	event: 'UserPromptExpansion',
 	inputSchema: Input,
 	outputSchema: Output,
 	handler: config.handler
 });
 
-/**
- * Build a ConfigChange hook that only handles matching `source` values.
- *
- * @category Constructors
- * @since 0.1.0
- */
 export const onMatcher = (config: {
 	readonly matcher: string | RegExp;
 	readonly handler: (
@@ -80,9 +87,8 @@ export const onMatcher = (config: {
 	define({
 		handler: Matcher.handleMatcher({
 			matcher: config.matcher,
-			select: (input) => input.source,
+			select: (input) => input.command_name,
 			onMatch: config.handler,
-			onMismatch:
-				config.onMismatch ?? (() => Effect.succeed(allow()))
+			onMismatch: config.onMismatch ?? (() => Effect.succeed(allow()))
 		})
 	});

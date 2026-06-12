@@ -44,8 +44,8 @@ export class Input extends Schema.Class<Input>('PreToolUseInput')(
 // ---------------------------------------------------------------------------
 
 /**
- * Valid `permissionDecision` values. `defer` defers to other hooks /
- * Claude Code's permission system.
+ * Valid `permissionDecision` values. `defer` suspends a headless tool call
+ * for later resumption; omit output entirely for a neutral no-op.
  *
  * @category Schemas
  * @since 0.1.0
@@ -85,6 +85,7 @@ export class Output extends Schema.Class<Output>('PreToolUseOutput')({
 	stopReason: Schema.optional(Schema.String),
 	suppressOutput: Schema.optional(Schema.Boolean),
 	systemMessage: Schema.optional(Schema.String),
+	terminalSequence: Schema.optional(Schema.String),
 	hookSpecificOutput: Schema.optional(HookSpecificOutput)
 }) {}
 
@@ -106,6 +107,15 @@ export const allow = (reason?: string): Output =>
 			permissionDecisionReason: reason
 		})
 	});
+
+/**
+ * Build a no-op output. The tool proceeds through normal permission flow.
+ *
+ * @category Decisions
+ * @since 0.1.0
+ */
+export const passthrough = (): Output =>
+	new Output({ continue: undefined });
 
 /**
  * Build a `deny` decision with a required explanation. The tool call
@@ -140,8 +150,9 @@ export const ask = (reason?: string): Output =>
 	});
 
 /**
- * Build a `defer` decision. No opinion from this hook — other hooks
- * and the permission system continue to evaluate the tool call.
+ * Build a `defer` decision. In headless mode, Claude Code exits with
+ * `stop_reason: "tool_deferred"` so an outer process can resume later.
+ * Use `passthrough()` for a neutral no-op.
  *
  * @category Decisions
  * @since 0.1.0
@@ -215,15 +226,15 @@ export const define = (config: {
 
 /**
  * Build a PreToolUse hook that only handles a specific supported tool.
- * Non-matching tool invocations default to `allow()`.
+ * Non-matching tool invocations default to `passthrough()`.
  *
  * @category Constructors
  * @since 0.1.0
  */
-type BashOnToolConfig = {
-	readonly toolName: 'Bash';
+export type OnToolConfig<T extends Tool.SupportedToolName> = {
+	readonly toolName: T;
 	readonly handler: (
-		input: Tool.DecodedPreToolUse<'Bash'>
+		input: Tool.DecodedPreToolUse<T>
 	) => Effect.Effect<Output, unknown, HookContext.Service>;
 	readonly onMismatch?: (
 		input: Input
@@ -234,54 +245,28 @@ type BashOnToolConfig = {
 	) => Effect.Effect<Output, unknown, HookContext.Service>;
 };
 
-type ReadOnToolConfig = {
-	readonly toolName: 'Read';
-	readonly handler: (
-		input: Tool.DecodedPreToolUse<'Read'>
-	) => Effect.Effect<Output, unknown, HookContext.Service>;
-	readonly onMismatch?: (
-		input: Input
-	) => Effect.Effect<Output, unknown, HookContext.Service>;
-	readonly onDecodeError?: (
-		error: HookToolDecodeError,
-		input: Input
-	) => Effect.Effect<Output, unknown, HookContext.Service>;
-};
-
-type OnToolConfig = BashOnToolConfig | ReadOnToolConfig;
-
-export function onTool(config: BashOnToolConfig): HookDefinition<Input, Output>;
-export function onTool(config: ReadOnToolConfig): HookDefinition<Input, Output>;
-export function onTool(config: OnToolConfig): HookDefinition<Input, Output> {
-	return define({
+export const onTool = <const T extends Tool.SupportedToolName>(
+	config: OnToolConfig<T>
+): HookDefinition<Input, Output> =>
+	define({
 		handler: (input): Effect.Effect<Output, unknown, HookContext.Service> => {
 			if (input.tool_name !== config.toolName) {
-				return config.onMismatch?.(input) ?? Effect.succeed(allow());
+				return config.onMismatch?.(input) ?? Effect.succeed(passthrough());
 			}
-			return config.toolName === 'Bash'
-				? Tool.decodePreToolUse('Bash', input).pipe(
-						Effect.flatMap(config.handler),
-						Effect.catch((error) =>
-							error instanceof HookToolDecodeError
-								? config.onDecodeError?.(error, input) ?? Effect.fail(error)
-								: Effect.fail(error)
-						)
-				  )
-				: Tool.decodePreToolUse('Read', input).pipe(
-						Effect.flatMap(config.handler),
-						Effect.catch((error) =>
-							error instanceof HookToolDecodeError
-								? config.onDecodeError?.(error, input) ?? Effect.fail(error)
-								: Effect.fail(error)
-						)
-				  );
+			return Tool.decodePreToolUse(config.toolName, input).pipe(
+				Effect.flatMap(config.handler),
+				Effect.catch((error) =>
+					error instanceof HookToolDecodeError
+						? config.onDecodeError?.(error, input) ?? Effect.fail(error)
+						: Effect.fail(error)
+				)
+			);
 		}
 	});
-}
 
 /**
  * Build a PreToolUse hook that only handles matching `tool_name` values.
- * Non-matching tool invocations default to `allow()`.
+ * Non-matching tool invocations default to `passthrough()`.
  *
  * @category Constructors
  * @since 0.1.0
@@ -301,13 +286,13 @@ export const onMatcher = (config: {
 			select: (input) => input.tool_name,
 			onMatch: config.handler,
 			onMismatch:
-				config.onMismatch ?? (() => Effect.succeed(allow()))
+				config.onMismatch ?? (() => Effect.succeed(passthrough()))
 		})
 	});
 
 /**
  * Build a PreToolUse hook from a custom typed tool adapter.
- * Non-matching tool invocations default to `allow()`.
+ * Non-matching tool invocations default to `passthrough()`.
  *
  * @category Constructors
  * @since 0.1.0
@@ -328,7 +313,7 @@ export const onAdapter = <TName extends string, TTool>(config: {
 	define({
 		handler: (input): Effect.Effect<Output, unknown, HookContext.Service> => {
 			if (input.tool_name !== config.adapter.toolName) {
-				return config.onMismatch?.(input) ?? Effect.succeed(allow());
+				return config.onMismatch?.(input) ?? Effect.succeed(passthrough());
 			}
 			return Tool.decodePreToolUseWith(config.adapter, input).pipe(
 				Effect.flatMap(config.handler),

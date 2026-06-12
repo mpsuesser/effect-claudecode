@@ -18,10 +18,14 @@ export {
 	AuthorInfo,
 	ChannelSpec,
 	ComponentPathSpec,
+	DependencySpec,
+	ExperimentalSpec,
 	HooksSpec,
+	PluginDependency,
 	PluginManifest,
 	ServerConfigSpec,
 	UserConfigEntry,
+	UserConfigType,
 	UserConfigRecord
 } from './Plugin/Manifest.ts';
 
@@ -32,9 +36,13 @@ export {
 export {
 	DirectoryPluginSource,
 	GithubPluginSource,
+	GitSubdirPluginSource,
 	MarketplaceFile,
+	MarketplaceMetadata,
 	MarketplacePluginEntry,
-	MarketplacePluginSourceSpec
+	MarketplacePluginSourceSpec,
+	NpmPluginSource,
+	UrlPluginSource
 } from './Plugin/Marketplace.ts';
 
 // ---------------------------------------------------------------------------

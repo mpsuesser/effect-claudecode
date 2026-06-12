@@ -306,7 +306,7 @@ describe('Plugin.load', () => {
 					fsWith([
 						[
 							'/plugin/skills/greet/SKILL.md',
-							'---\ndescription: Missing required name\n---\n\n# Broken\n'
+							'---\nname: greet\ndescription: Invalid effort\neffort: ludicrous\n---\n\n# Broken\n'
 						]
 					])
 				)

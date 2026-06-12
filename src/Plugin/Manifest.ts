@@ -8,8 +8,8 @@
  * strings. `hooks`, `mcpServers`, and `lspServers` additionally accept
  * inline record objects.
  *
- * See https://docs.claude.com/en/docs/claude-code/plugins-reference for
- * the authoritative spec.
+ * See https://code.claude.com/docs/en/plugins-reference for the
+ * authoritative spec.
  *
  * @since 0.1.0
  */
@@ -40,8 +40,8 @@ export class AuthorInfo extends Schema.Class<AuthorInfo>('AuthorInfo')({
 // ---------------------------------------------------------------------------
 
 /**
- * `commands`, `agents`, `skills`, and `outputStyles` accept either a
- * single path string or an array of path strings.
+ * `commands`, `agents`, `skills`, `outputStyles`, themes, and monitors
+ * accept either a single path string or an array of path strings.
  *
  * @category Schemas
  * @since 0.1.0
@@ -89,6 +89,14 @@ export type ServerConfigSpec = Schema.Schema.Type<typeof ServerConfigSpec>;
 // userConfig
 // ---------------------------------------------------------------------------
 
+export const UserConfigType = Schema.Literals([
+	'string',
+	'number',
+	'boolean',
+	'directory',
+	'file'
+] as const);
+
 /**
  * A single entry in the `userConfig` record. Claude Code prompts the
  * user for these values when the plugin is enabled. Sensitive values
@@ -100,8 +108,15 @@ export type ServerConfigSpec = Schema.Schema.Type<typeof ServerConfigSpec>;
 export class UserConfigEntry extends Schema.Class<UserConfigEntry>(
 	'UserConfigEntry'
 )({
-	description: Schema.optional(Schema.String),
-	sensitive: Schema.optional(Schema.Boolean)
+	type: UserConfigType,
+	title: Schema.String,
+	description: Schema.String,
+	sensitive: Schema.optional(Schema.Boolean),
+	required: Schema.optional(Schema.Boolean),
+	default: Schema.optional(Schema.Unknown),
+	multiple: Schema.optional(Schema.Boolean),
+	min: Schema.optional(Schema.Number),
+	max: Schema.optional(Schema.Number)
 }) {}
 
 /**
@@ -119,7 +134,7 @@ export const UserConfigRecord = Schema.Record(
 export type UserConfigRecord = Schema.Schema.Type<typeof UserConfigRecord>;
 
 // ---------------------------------------------------------------------------
-// Channels
+// Channels / dependencies / experimental
 // ---------------------------------------------------------------------------
 
 /**
@@ -133,6 +148,25 @@ export type UserConfigRecord = Schema.Schema.Type<typeof UserConfigRecord>;
 export class ChannelSpec extends Schema.Class<ChannelSpec>('ChannelSpec')({
 	server: Schema.String,
 	userConfig: Schema.optional(UserConfigRecord)
+}) {}
+
+export class PluginDependency extends Schema.Class<PluginDependency>(
+	'PluginDependency'
+)({
+	name: Schema.String,
+	version: Schema.optional(Schema.String)
+}) {}
+
+export const DependencySpec = Schema.Union([
+	Schema.String,
+	PluginDependency
+]).annotate({ identifier: 'DependencySpec' });
+
+export class ExperimentalSpec extends Schema.Class<ExperimentalSpec>(
+	'ExperimentalSpec'
+)({
+	themes: Schema.optional(ComponentPathSpec),
+	monitors: Schema.optional(ComponentPathSpec)
 }) {}
 
 // ---------------------------------------------------------------------------
@@ -154,13 +188,18 @@ export class PluginManifest extends Schema.Class<PluginManifest>(
 	name: Schema.String,
 
 	// Metadata
+	$schema: Schema.optional(Schema.String),
 	version: Schema.optional(Schema.String),
 	description: Schema.optional(Schema.String),
+	displayName: Schema.optional(Schema.String),
+	defaultEnabled: Schema.optional(Schema.Boolean),
 	author: Schema.optional(AuthorInfo),
 	homepage: Schema.optional(Schema.String),
 	repository: Schema.optional(Schema.String),
 	license: Schema.optional(Schema.String),
 	keywords: Schema.optional(Schema.Array(Schema.String)),
+	dependencies: Schema.optional(Schema.Array(DependencySpec)),
+	experimental: Schema.optional(ExperimentalSpec),
 
 	// Component path fields
 	commands: Schema.optional(ComponentPathSpec),

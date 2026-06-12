@@ -104,7 +104,7 @@ describe('Testing.fixtures', () => {
 		Effect.gen(function* () {
 			const json = Testing.fixtures.FileChanged({
 				file_path: '/other/path.ts',
-				change_type: 'deleted'
+				event: 'unlink'
 			});
 			const parsed = Schema.decodeUnknownSync(
 				Schema.UnknownFromJsonString
@@ -114,7 +114,7 @@ describe('Testing.fixtures', () => {
 			)(parsed);
 			expect(input).toMatchObject({
 				file_path: '/other/path.ts',
-				change_type: 'deleted'
+				event: 'unlink'
 			});
 		})
 	);
@@ -129,6 +129,7 @@ describe('Testing.fixtures', () => {
 				'Stop',
 				'SubagentStop',
 				'SessionStart',
+				'Setup',
 				'SessionEnd',
 				'PreCompact',
 				'PostCompact',
@@ -147,7 +148,10 @@ describe('Testing.fixtures', () => {
 				'WorktreeCreate',
 				'WorktreeRemove',
 				'Elicitation',
-				'ElicitationResult'
+				'ElicitationResult',
+				'UserPromptExpansion',
+				'PostToolBatch',
+				'MessageDisplay'
 			],
 			Order.String
 		);

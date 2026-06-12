@@ -18,14 +18,20 @@ import * as Matcher from '../Matcher.ts';
 import type { HookDefinition } from '../Runner.ts';
 
 export const Action = Schema.Literals(['accept', 'decline', 'cancel'] as const);
+export const Mode = Schema.Literals(['form', 'url'] as const);
 
 export class Input extends Schema.Class<Input>('ElicitationInput')(
 	{
 		...envelopeFields,
 		hook_event_name: Schema.Literal('Elicitation'),
 		mcp_server_name: Schema.String,
-		tool_name: Schema.optional(Schema.String),
-		tool_input: Schema.optional(Schema.Record(Schema.String, Schema.Unknown))
+		message: Schema.String,
+		mode: Schema.optional(Mode),
+		url: Schema.optional(Schema.String),
+		elicitation_id: Schema.optional(Schema.String),
+		requested_schema: Schema.optional(
+			Schema.Record(Schema.String, Schema.Unknown)
+		)
 	},
 	{ description: 'Input for the Elicitation hook event.' }
 ) {}
@@ -43,6 +49,7 @@ export class Output extends Schema.Class<Output>('ElicitationOutput')({
 	stopReason: Schema.optional(Schema.String),
 	suppressOutput: Schema.optional(Schema.Boolean),
 	systemMessage: Schema.optional(Schema.String),
+	terminalSequence: Schema.optional(Schema.String),
 	hookSpecificOutput: Schema.optional(HookSpecificOutput)
 }) {}
 

@@ -4,7 +4,7 @@
  * Fires after a tool call fails or is interrupted. A handler can attach
  * additional context that Claude will see in place of (or alongside) the
  * raw error. Supports a matcher on `tool_name`.
- * See https://code.claude.com/docs/en/hooks#posttooluseailure.
+ * See https://code.claude.com/docs/en/hooks#posttoolusefailure.
  *
  * @since 0.1.0
  */
@@ -24,7 +24,8 @@ export class Input extends Schema.Class<Input>('PostToolUseFailureInput')(
 		tool_input: Schema.Record(Schema.String, Schema.Unknown),
 		tool_use_id: Schema.optional(Schema.String),
 		error: Schema.String,
-		is_interrupt: Schema.optional(Schema.Boolean)
+		is_interrupt: Schema.optional(Schema.Boolean),
+		duration_ms: Schema.optional(Schema.Number)
 	},
 	{ description: 'Input for the PostToolUseFailure hook event.' }
 ) {}
@@ -37,10 +38,13 @@ export class HookSpecificOutput extends Schema.Class<HookSpecificOutput>(
 }) {}
 
 export class Output extends Schema.Class<Output>('PostToolUseFailureOutput')({
+	decision: Schema.optional(Schema.Literal('block')),
+	reason: Schema.optional(Schema.String),
 	continue: Schema.optional(Schema.Boolean),
 	stopReason: Schema.optional(Schema.String),
 	suppressOutput: Schema.optional(Schema.Boolean),
 	systemMessage: Schema.optional(Schema.String),
+	terminalSequence: Schema.optional(Schema.String),
 	hookSpecificOutput: Schema.optional(HookSpecificOutput)
 }) {}
 
@@ -54,6 +58,9 @@ export const addContext = (additionalContext: string): Output =>
 			additionalContext
 		})
 	});
+
+export const block = (reason: string): Output =>
+	new Output({ decision: 'block', reason });
 
 export const define = (config: {
 	readonly handler: (

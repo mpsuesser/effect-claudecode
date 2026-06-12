@@ -25,7 +25,8 @@ export class Input extends Schema.Class<Input>('PreCompactInput')(
 	{
 		...envelopeFields,
 		hook_event_name: Schema.Literal('PreCompact'),
-		trigger: Trigger
+		trigger: Trigger,
+		custom_instructions: Schema.optional(Schema.String)
 	},
 	{ description: 'Input for the PreCompact hook event.' }
 ) {}
@@ -35,10 +36,13 @@ export class Input extends Schema.Class<Input>('PreCompactInput')(
 // ---------------------------------------------------------------------------
 
 export class Output extends Schema.Class<Output>('PreCompactOutput')({
+	decision: Schema.optional(Schema.Literal('block')),
+	reason: Schema.optional(Schema.String),
 	continue: Schema.optional(Schema.Boolean),
 	stopReason: Schema.optional(Schema.String),
 	suppressOutput: Schema.optional(Schema.Boolean),
-	systemMessage: Schema.optional(Schema.String)
+	systemMessage: Schema.optional(Schema.String),
+	terminalSequence: Schema.optional(Schema.String)
 }) {}
 
 // ---------------------------------------------------------------------------
@@ -47,6 +51,9 @@ export class Output extends Schema.Class<Output>('PreCompactOutput')({
 
 export const passthrough = (): Output =>
 	new Output({ continue: undefined });
+
+export const block = (reason: string): Output =>
+	new Output({ decision: 'block', reason });
 
 // ---------------------------------------------------------------------------
 // define

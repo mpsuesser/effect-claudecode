@@ -84,6 +84,36 @@ describe('Hook.Tool decoders', () => {
 		})
 	);
 
+	it.effect('decodes a Bash PostToolUse payload with the current response shape', () =>
+		Effect.gen(function* () {
+			const decoded = yield* Tool.decodePostToolUse('Bash', new PostToolUse.Input({
+				session_id: 'session-1',
+				transcript_path: '/tmp/t.jsonl',
+				cwd: '/tmp/ws',
+				hook_event_name: 'PostToolUse',
+				permission_mode: 'default',
+				tool_name: 'Bash',
+				tool_input: {
+					command: 'npm test',
+					description: 'Run tests',
+					timeout: 120000,
+					run_in_background: false
+				},
+				tool_response: {
+					stdout: 'ok\n',
+					stderr: '',
+					interrupted: false,
+					isImage: false
+				},
+				tool_use_id: 'call-1'
+			}));
+
+			expect(decoded.tool.timeout).toBe(120000);
+			expect(decoded.response.stdout).toBe('ok\n');
+			expect(decoded.response.interrupted).toBe(false);
+		})
+	);
+
 	it.effect('decodes a Read PostToolUse payload', () =>
 		Effect.gen(function* () {
 			const decoded = yield* Tool.decodePostToolUse('Read', new PostToolUse.Input({
@@ -172,7 +202,12 @@ describe('Hook.Tool decoders', () => {
 						permission_mode: 'default',
 						tool_name: 'Bash',
 						tool_input: { command: 'ls -la' },
-						tool_response: { output: 'ok', exit_code: 0 },
+						tool_response: {
+							stdout: 'ok',
+							stderr: '',
+							interrupted: false,
+							isImage: false
+						},
 						tool_use_id: 'call-1'
 					})
 				)
@@ -219,7 +254,7 @@ describe('Hook.PreToolUse.onTool', () => {
 		})
 	);
 
-	it.effect('defaults to allow() when the tool name does not match', () =>
+	it.effect('defaults to passthrough() when the tool name does not match', () =>
 		Effect.gen(function* () {
 			const hook = PreToolUse.onTool({
 				toolName: 'Bash',
@@ -232,8 +267,34 @@ describe('Hook.PreToolUse.onTool', () => {
 			);
 
 			expect(result.exitCode).toBe(0);
+			expect(result.output).toEqual({});
+		})
+	);
+
+	it.effect('invokes the typed WebSearch handler for matching tool names', () =>
+		Effect.gen(function* () {
+			const hook = PreToolUse.onTool({
+				toolName: 'WebSearch',
+				handler: ({ tool }) =>
+					Effect.succeed(
+						PreToolUse.deny(`search blocked: ${tool.query}`)
+					)
+			});
+
+			const result = yield* Testing.runHookWithMockStdin(
+				hook,
+				makePreToolUseJson('WebSearch', {
+					query: 'react hooks',
+					allowed_domains: ['react.dev']
+				})
+			);
+
+			expect(result.exitCode).toBe(0);
 			expect(result.output).toMatchObject({
-				hookSpecificOutput: { permissionDecision: 'allow' }
+				hookSpecificOutput: {
+					permissionDecision: 'deny',
+					permissionDecisionReason: 'search blocked: react hooks'
+				}
 			});
 		})
 	);

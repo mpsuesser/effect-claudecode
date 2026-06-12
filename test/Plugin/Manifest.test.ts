@@ -207,13 +207,31 @@ describe('PluginManifest — userConfig and channels', () => {
 			const manifest = yield* decodeManifest({
 				name: 'p',
 				userConfig: {
-					api_endpoint: { description: 'API endpoint URL' },
-					api_token: { description: 'Auth token', sensitive: true }
+					api_endpoint: {
+						type: 'string',
+						title: 'API endpoint',
+						description: 'API endpoint URL'
+					},
+					api_token: {
+						type: 'string',
+						title: 'API token',
+						description: 'Auth token',
+						sensitive: true
+					}
 				}
 			});
 			expect(manifest.userConfig).toMatchObject({
-				api_endpoint: { description: 'API endpoint URL' },
-				api_token: { description: 'Auth token', sensitive: true }
+				api_endpoint: {
+					type: 'string',
+					title: 'API endpoint',
+					description: 'API endpoint URL'
+				},
+				api_token: {
+					type: 'string',
+					title: 'API token',
+					description: 'Auth token',
+					sensitive: true
+				}
 			});
 			const token = manifest.userConfig?.['api_token'];
 			expect(token).toBeInstanceOf(UserConfigEntry);
@@ -229,6 +247,8 @@ describe('PluginManifest — userConfig and channels', () => {
 						server: 'telegram',
 						userConfig: {
 							bot_token: {
+								type: 'string',
+								title: 'Telegram bot token',
 								description: 'Telegram bot token',
 								sensitive: true
 							}

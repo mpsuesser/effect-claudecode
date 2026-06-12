@@ -34,6 +34,9 @@ export namespace HookContext {
 			readonly cwd: string;
 			readonly permissionMode: Option.Option<string>;
 			readonly hookEventName: string;
+			readonly effort: Option.Option<HookEnvelope['effort']>;
+			readonly agentId: Option.Option<string>;
+			readonly agentType: Option.Option<string>;
 		}
 
 	/**
@@ -57,7 +60,10 @@ export namespace HookContext {
 		transcriptPath: env.transcript_path,
 		cwd: env.cwd,
 		permissionMode: Option.fromNullishOr(env.permission_mode),
-		hookEventName: env.hook_event_name
+		hookEventName: env.hook_event_name,
+		effort: Option.fromNullishOr(env.effort),
+		agentId: Option.fromNullishOr(env.agent_id),
+		agentType: Option.fromNullishOr(env.agent_type)
 	});
 
 	/**
@@ -138,3 +144,39 @@ export const hookEventName: Effect.Effect<
 > = Effect.service(HookContext.Service).pipe(
 	Effect.map((c) => c.hookEventName)
 );
+
+/**
+ * Effectful access to the active effort level payload (if any).
+ *
+ * @category Accessors
+ * @since 0.1.0
+ */
+export const effort: Effect.Effect<
+	Option.Option<HookEnvelope['effort']>,
+	never,
+	HookContext.Service
+> = Effect.service(HookContext.Service).pipe(Effect.map((c) => c.effort));
+
+/**
+ * Effectful access to the current subagent/session agent id (if any).
+ *
+ * @category Accessors
+ * @since 0.1.0
+ */
+export const agentId: Effect.Effect<
+	Option.Option<string>,
+	never,
+	HookContext.Service
+> = Effect.service(HookContext.Service).pipe(Effect.map((c) => c.agentId));
+
+/**
+ * Effectful access to the current subagent/session agent type (if any).
+ *
+ * @category Accessors
+ * @since 0.1.0
+ */
+export const agentType: Effect.Effect<
+	Option.Option<string>,
+	never,
+	HookContext.Service
+> = Effect.service(HookContext.Service).pipe(Effect.map((c) => c.agentType));

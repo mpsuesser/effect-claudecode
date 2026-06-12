@@ -15,6 +15,7 @@ import * as Effect from 'effect/Effect';
 import * as FileSystem from 'effect/FileSystem';
 import * as Option from 'effect/Option';
 import * as Path from 'effect/Path';
+import * as R from 'effect/Record';
 import * as Schema from 'effect/Schema';
 
 import {
@@ -22,7 +23,11 @@ import {
 	SettingsParseError,
 	SettingsReadError
 } from '../Errors.ts';
-import { SettingsFile } from './Schema.ts';
+import {
+	PermissionsConfig,
+	SettingsFile,
+	WorkingDirectoriesConfig
+} from './Schema.ts';
 
 // ---------------------------------------------------------------------------
 // Home directory lookup
@@ -83,18 +88,169 @@ const decodeSettingsFile = (
 		);
 	});
 
+/** @internal */
+const mergeOptions = <A>(
+	base: Option.Option<A>,
+	override: Option.Option<A>,
+	merge: (base: A, override: A) => A
+): Option.Option<A> =>
+	Option.match(base, {
+		onNone: () => override,
+		onSome: (baseValue) =>
+			Option.match(override, {
+				onNone: () => base,
+				onSome: (overrideValue) =>
+					Option.some(merge(baseValue, overrideValue))
+			})
+	});
+
+/** @internal */
+const mergeOptionalStringArrays = (
+	base: ReadonlyArray<string> | undefined,
+	override: ReadonlyArray<string> | undefined
+): ReadonlyArray<string> | undefined =>
+	Option.getOrUndefined(
+		mergeOptions(
+			Option.fromNullishOr(base),
+			Option.fromNullishOr(override),
+			(baseValue, overrideValue) =>
+				Arr.dedupe(Arr.appendAll(baseValue, overrideValue))
+		)
+	);
+
+/** @internal */
+const mergeOptionalRecords = <A>(
+	base: Readonly<Record<string, A>> | undefined,
+	override: Readonly<Record<string, A>> | undefined
+): Record<string, A> | undefined =>
+	Option.getOrUndefined(
+		mergeOptions(
+			Option.fromNullishOr(base),
+			Option.fromNullishOr(override),
+			(baseValue, overrideValue) =>
+				R.union(
+					baseValue,
+					overrideValue,
+					(_baseValue, overrideRecordValue) => overrideRecordValue
+				)
+		)
+	);
+
+/** @internal */
+const mergeWorkingDirectories = (
+	base: WorkingDirectoriesConfig | undefined,
+	override: WorkingDirectoriesConfig | undefined
+): WorkingDirectoriesConfig | undefined =>
+	Option.getOrUndefined(
+		mergeOptions(
+			Option.fromNullishOr(base),
+			Option.fromNullishOr(override),
+			(baseValue, overrideValue) =>
+				new WorkingDirectoriesConfig({
+					...baseValue,
+					...overrideValue,
+					allowed: mergeOptionalStringArrays(
+						baseValue.allowed,
+						overrideValue.allowed
+					),
+					denied: mergeOptionalStringArrays(
+						baseValue.denied,
+						overrideValue.denied
+					)
+				})
+		)
+	);
+
+/** @internal */
+const mergePermissions = (
+	base: PermissionsConfig | undefined,
+	override: PermissionsConfig | undefined
+): PermissionsConfig | undefined =>
+	Option.getOrUndefined(
+		mergeOptions(
+			Option.fromNullishOr(base),
+			Option.fromNullishOr(override),
+			(baseValue, overrideValue) =>
+				new PermissionsConfig({
+					...baseValue,
+					...overrideValue,
+					allow: mergeOptionalStringArrays(
+						baseValue.allow,
+						overrideValue.allow
+					),
+					ask: mergeOptionalStringArrays(
+						baseValue.ask,
+						overrideValue.ask
+					),
+					deny: mergeOptionalStringArrays(
+						baseValue.deny,
+						overrideValue.deny
+					),
+					additionalDirectories: mergeOptionalStringArrays(
+						baseValue.additionalDirectories,
+						overrideValue.additionalDirectories
+					),
+					workingDirectories: mergeWorkingDirectories(
+						baseValue.workingDirectories,
+						overrideValue.workingDirectories
+					)
+				})
+		)
+	);
+
+/** @internal */
+const mergeHooks = (
+	base: SettingsFile['hooks'],
+	override: SettingsFile['hooks']
+): SettingsFile['hooks'] =>
+	Option.getOrUndefined(
+		mergeOptions(
+			Option.fromNullishOr(base),
+			Option.fromNullishOr(override),
+			(baseValue, overrideValue) =>
+				R.union(baseValue, overrideValue, (baseGroups, overrideGroups) =>
+					Arr.appendAll(baseGroups, overrideGroups)
+				)
+		)
+	);
+
 /**
  * Merge a higher-priority settings file on top of a lower-priority one.
  *
- * Uses a shallow field-level merge via object spread. Later sources
- * replace top-level keys entirely; nested structures are not deep-merged.
+ * Claude Code concatenates array-valued settings across scopes while
+ * higher-priority scalar values override lower-priority values. This
+ * helper models the known nested settings that need merge behavior and
+ * keeps ordinary scalar fields on the usual "later wins" path.
  *
  * @internal
  */
 const mergeSettings = (
 	base: SettingsFile,
 	override: SettingsFile
-): SettingsFile => new SettingsFile({ ...base, ...override });
+): SettingsFile =>
+	new SettingsFile({
+		...base,
+		...override,
+		hooks: mergeHooks(base.hooks, override.hooks),
+		permissions: mergePermissions(base.permissions, override.permissions),
+		env: mergeOptionalRecords(base.env, override.env),
+		enabledPlugins: mergeOptionalRecords(
+			base.enabledPlugins,
+			override.enabledPlugins
+		),
+		extraKnownMarketplaces: mergeOptionalRecords(
+			base.extraKnownMarketplaces,
+			override.extraKnownMarketplaces
+		),
+		allowedHttpHookUrls: mergeOptionalStringArrays(
+			base.allowedHttpHookUrls,
+			override.allowedHttpHookUrls
+		),
+		httpHookAllowedEnvVars: mergeOptionalStringArrays(
+			base.httpHookAllowedEnvVars,
+			override.httpHookAllowedEnvVars
+		)
+	});
 
 const emptySettings = new SettingsFile({});
 
@@ -199,15 +355,19 @@ export const load = (
 
 		const sources = yield* Effect.forEach(
 			[userPath, projectPath, localPath],
-			readOptionalFile
+			readOptionalFile,
+			{ concurrency: 1 }
 		);
 
-		const decoded = yield* Effect.forEach(sources, (source) =>
-			Option.isNone(source.content)
-				? Effect.succeed(Option.none<SettingsFile>())
-				: decodeSettingsFile(source.path, source.content.value).pipe(
-						Effect.map(Option.some)
-					)
+		const decoded = yield* Effect.forEach(
+			sources,
+			(source) =>
+				Option.isNone(source.content)
+					? Effect.succeed(Option.none<SettingsFile>())
+					: decodeSettingsFile(source.path, source.content.value).pipe(
+							Effect.map(Option.some)
+						),
+			{ concurrency: 1 }
 		);
 
 		return Arr.reduce(decoded, emptySettings, (acc, maybe) =>

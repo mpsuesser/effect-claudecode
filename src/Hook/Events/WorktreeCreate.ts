@@ -2,11 +2,9 @@
  * WorktreeCreate hook event.
  *
  * Fires when Claude Code is about to create a git worktree (e.g. for an
- * isolated subagent). Command-based hooks traditionally print the
- * worktree path to stdout; HTTP-based hooks return the path as
- * `hookSpecificOutput.worktreePath`. This library uses the JSON form
- * so handlers can attach other fields alongside. Does not support a
- * matcher.
+ * isolated subagent). Command-based hooks must print the worktree path
+ * to stdout; HTTP-based hooks return the path as
+ * `hookSpecificOutput.worktreePath`. Does not support a matcher.
  * See https://code.claude.com/docs/en/hooks#worktreecreate.
  *
  * @since 0.1.0
@@ -16,14 +14,17 @@ import * as Schema from 'effect/Schema';
 
 import type { HookContext } from '../Context.ts';
 import { envelopeFields } from '../Envelope.ts';
-import type { HookDefinition } from '../Runner.ts';
+import {
+	rawStdout,
+	type HookDefinition,
+	type HookProcessOutput
+} from '../Runner.ts';
 
 export class Input extends Schema.Class<Input>('WorktreeCreateInput')(
 	{
 		...envelopeFields,
 		hook_event_name: Schema.Literal('WorktreeCreate'),
-		worktree_path: Schema.optional(Schema.String),
-		git_repo_path: Schema.optional(Schema.String)
+		name: Schema.String
 	},
 	{ description: 'Input for the WorktreeCreate hook event.' }
 ) {}
@@ -40,6 +41,7 @@ export class Output extends Schema.Class<Output>('WorktreeCreateOutput')({
 	stopReason: Schema.optional(Schema.String),
 	suppressOutput: Schema.optional(Schema.Boolean),
 	systemMessage: Schema.optional(Schema.String),
+	terminalSequence: Schema.optional(Schema.String),
 	hookSpecificOutput: Schema.optional(HookSpecificOutput)
 }) {}
 
@@ -49,7 +51,16 @@ export class Output extends Schema.Class<Output>('WorktreeCreateOutput')({
  * @category Decisions
  * @since 0.1.0
  */
-export const created = (worktreePath: string): Output =>
+export const created = (worktreePath: string): HookProcessOutput =>
+	rawStdout(`${worktreePath}\n`);
+
+/**
+ * Build the JSON form used by HTTP WorktreeCreate hooks.
+ *
+ * @category Decisions
+ * @since 0.1.0
+ */
+export const createdHttp = (worktreePath: string): Output =>
 	new Output({
 		hookSpecificOutput: new HookSpecificOutput({
 			hookEventName: 'WorktreeCreate',
@@ -60,8 +71,8 @@ export const created = (worktreePath: string): Output =>
 export const define = (config: {
 	readonly handler: (
 		input: Input
-	) => Effect.Effect<Output, unknown, HookContext.Service>;
-}): HookDefinition<Input, Output> => ({
+	) => Effect.Effect<Output | HookProcessOutput, unknown, HookContext.Service>;
+}): HookDefinition<Input, Output> => ({ 
 	event: 'WorktreeCreate',
 	inputSchema: Input,
 	outputSchema: Output,

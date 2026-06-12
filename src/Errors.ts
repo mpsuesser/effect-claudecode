@@ -87,6 +87,19 @@ export class HookStdoutWriteError extends Schema.TaggedErrorClass<HookStdoutWrit
 }) {}
 
 /**
+ * Raised internally when a handler intentionally controls the command
+ * process exit status (for example, an exit-2 hook response).
+ *
+ * @category Hook errors
+ * @since 0.1.0
+ */
+export class HookControlledExit extends Schema.TaggedErrorClass<HookControlledExit>(
+	'effect-claudecode/HookControlledExit'
+)('HookControlledExit', {
+	code: Schema.Number
+}) {}
+
+/**
  * Raised when decoding a known tool payload from `tool_input` or
  * `tool_response` fails.
  *
@@ -179,6 +192,20 @@ export class PluginWriteError extends Schema.TaggedErrorClass<PluginWriteError>(
 )('PluginWriteError', {
 	path: Schema.String,
 	cause: Schema.Defect()
+}) {}
+
+/**
+ * Raised when a plugin definition is internally inconsistent.
+ *
+ * @category Plugin errors
+ * @since 0.1.0
+ */
+export class PluginDefinitionError extends Schema.TaggedErrorClass<PluginDefinitionError>(
+	'effect-claudecode/PluginDefinitionError'
+)('PluginDefinitionError', {
+	kind: Schema.String,
+	entryName: Schema.String,
+	frontmatterName: Schema.String
 }) {}
 
 /**

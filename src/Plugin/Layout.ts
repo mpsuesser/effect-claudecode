@@ -4,6 +4,8 @@
  * @since 0.1.0
  */
 import type { PluginDefinition } from './Define.ts';
+import * as Option from 'effect/Option';
+
 import {
 	type ComponentPathSpec,
 	type HooksSpec,
@@ -21,62 +23,70 @@ const canonicalComponentPaths = {
 type ComponentKey = keyof typeof canonicalComponentPaths;
 
 const keepOrDefaultComponentSpec = (
-	spec: ComponentPathSpec | undefined,
+	spec: Option.Option<ComponentPathSpec>,
 	hasEntries: boolean,
 	key: ComponentKey
-): ComponentPathSpec | undefined => {
+): Option.Option<ComponentPathSpec> => {
 	if (!hasEntries) {
-		return undefined;
+		return Option.none();
 	}
-	return spec ?? canonicalComponentPaths[key];
+	return Option.some(
+		Option.getOrElse(spec, () => canonicalComponentPaths[key])
+	);
 };
 
 const keepOrDefaultHooksSpec = (
-	spec: HooksSpec | undefined,
+	spec: Option.Option<HooksSpec>,
 	hasConfig: boolean
-): HooksSpec | undefined => {
-	if (
-		spec !== undefined &&
-		typeof spec !== 'string' &&
-		!Array.isArray(spec)
-	) {
-		return spec;
-	}
-	if (!hasConfig) {
-		return undefined;
-	}
-	if (Array.isArray(spec) && spec.length > 1) {
-		return 'hooks/hooks.json';
-	}
-	return spec ?? 'hooks/hooks.json';
-};
+): Option.Option<HooksSpec> =>
+	Option.match(spec, {
+		onNone: () =>
+			hasConfig ? Option.some('hooks/hooks.json') : Option.none(),
+		onSome: (specValue) => {
+			if (typeof specValue !== 'string' && !Array.isArray(specValue)) {
+				return Option.some(specValue);
+			}
+			if (!hasConfig) {
+				return Option.none();
+			}
+			if (Array.isArray(specValue) && specValue.length > 1) {
+				return Option.some('hooks/hooks.json');
+			}
+			return Option.some(specValue);
+		}
+	});
 
 const keepOrDefaultServerSpec = (
-	spec: ServerConfigSpec | undefined,
+	spec: Option.Option<ServerConfigSpec>,
 	hasConfig: boolean,
 	fallback: string
-): ServerConfigSpec | undefined => {
-	if (
-		spec !== undefined &&
-		typeof spec !== 'string' &&
-		!Array.isArray(spec)
-	) {
-		return spec;
-	}
-	if (!hasConfig) {
-		return undefined;
-	}
-	if (Array.isArray(spec) && spec.length > 1) {
-		return fallback;
-	}
-	return spec ?? fallback;
-};
+): Option.Option<ServerConfigSpec> =>
+	Option.match(spec, {
+		onNone: () =>
+			hasConfig ? Option.some(fallback) : Option.none(),
+		onSome: (specValue) => {
+			if (typeof specValue !== 'string' && !Array.isArray(specValue)) {
+				return Option.some(specValue);
+			}
+			if (!hasConfig) {
+				return Option.none();
+			}
+			if (Array.isArray(specValue) && specValue.length > 1) {
+				return Option.some(fallback);
+			}
+			return Option.some(specValue);
+		}
+	});
 
 /** @internal */
 export const pathSpecs = (
-	spec: string | ReadonlyArray<string> | undefined
+	spec: Option.Option<string | ReadonlyArray<string>>
 ): ReadonlyArray<string> =>
-	spec === undefined ? [] : typeof spec === 'string' ? [spec] : spec;
+	Option.match(spec, {
+		onNone: () => [],
+		onSome: (specValue) =>
+			typeof specValue === 'string' ? [specValue] : specValue
+	});
 
 /** @internal */
 export const isMarkdownFilePath = (path: string): boolean =>
@@ -94,43 +104,60 @@ export const isSkillFilePath = (path: string): boolean =>
 export const syncManifest = (definition: PluginDefinition): PluginManifest =>
 	new PluginManifest({
 		name: definition.manifest.name,
+		$schema: definition.manifest.$schema,
 		version: definition.manifest.version,
 		description: definition.manifest.description,
+		displayName: definition.manifest.displayName,
+		defaultEnabled: definition.manifest.defaultEnabled,
 		author: definition.manifest.author,
 		homepage: definition.manifest.homepage,
 		repository: definition.manifest.repository,
 		license: definition.manifest.license,
 		keywords: definition.manifest.keywords,
+		dependencies: definition.manifest.dependencies,
+		experimental: definition.manifest.experimental,
 		userConfig: definition.manifest.userConfig,
 		channels: definition.manifest.channels,
-		commands: keepOrDefaultComponentSpec(
-			definition.manifest.commands,
-			definition.commands.length > 0,
-			'commands'
+		commands: Option.getOrUndefined(
+			keepOrDefaultComponentSpec(
+				Option.fromNullishOr(definition.manifest.commands),
+				definition.commands.length > 0,
+				'commands'
+			)
 		),
-		agents: keepOrDefaultComponentSpec(
-			definition.manifest.agents,
-			definition.agents.length > 0,
-			'agents'
+		agents: Option.getOrUndefined(
+			keepOrDefaultComponentSpec(
+				Option.fromNullishOr(definition.manifest.agents),
+				definition.agents.length > 0,
+				'agents'
+			)
 		),
-		skills: keepOrDefaultComponentSpec(
-			definition.manifest.skills,
-			definition.skills.length > 0,
-			'skills'
+		skills: Option.getOrUndefined(
+			keepOrDefaultComponentSpec(
+				Option.fromNullishOr(definition.manifest.skills),
+				definition.skills.length > 0,
+				'skills'
+			)
 		),
-		outputStyles: keepOrDefaultComponentSpec(
-			definition.manifest.outputStyles,
-			definition.outputStyles.length > 0,
-			'outputStyles'
+		outputStyles: Option.getOrUndefined(
+			keepOrDefaultComponentSpec(
+				Option.fromNullishOr(definition.manifest.outputStyles),
+				definition.outputStyles.length > 0,
+				'outputStyles'
+			)
 		),
-		hooks: keepOrDefaultHooksSpec(
-			definition.manifest.hooks,
-			definition.hooksConfig._tag === 'Some'
+		hooks: Option.getOrUndefined(
+			keepOrDefaultHooksSpec(
+				Option.fromNullishOr(definition.manifest.hooks),
+				Option.isSome(definition.hooksConfig)
+			)
 		),
-		mcpServers: keepOrDefaultServerSpec(
-			definition.manifest.mcpServers,
-			definition.mcpConfig._tag === 'Some',
-			'.mcp.json'
+		mcpServers: Option.getOrUndefined(
+			keepOrDefaultServerSpec(
+				Option.fromNullishOr(definition.manifest.mcpServers),
+				Option.isSome(definition.mcpConfig),
+				'.mcp.json'
+			)
 		),
 		lspServers: definition.manifest.lspServers
 	});

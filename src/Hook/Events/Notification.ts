@@ -3,8 +3,8 @@
  *
  * Fires when Claude Code sends a notification to the user — permission
  * prompts, idle prompts, auth success, elicitation dialog. Supports a
- * matcher on `notification_type`. The hook cannot block the notification
- * but may annotate it via `additionalContext`.
+ * matcher on `notification_type`. The hook cannot block or modify the
+ * notification; use common output fields for user-visible side effects.
  * See https://code.claude.com/docs/en/hooks#notification.
  *
  * @since 0.1.0
@@ -25,7 +25,9 @@ export const NotificationType = Schema.Literals([
 	'permission_prompt',
 	'idle_prompt',
 	'auth_success',
-	'elicitation_dialog'
+	'elicitation_dialog',
+	'elicitation_complete',
+	'elicitation_response'
 ] as const);
 
 export class Input extends Schema.Class<Input>('NotificationInput')(
@@ -43,19 +45,12 @@ export class Input extends Schema.Class<Input>('NotificationInput')(
 // Output
 // ---------------------------------------------------------------------------
 
-export class HookSpecificOutput extends Schema.Class<HookSpecificOutput>(
-	'NotificationHookSpecificOutput'
-)({
-	hookEventName: Schema.Literal('Notification'),
-	additionalContext: Schema.optional(Schema.String)
-}) {}
-
 export class Output extends Schema.Class<Output>('NotificationOutput')({
 	continue: Schema.optional(Schema.Boolean),
 	stopReason: Schema.optional(Schema.String),
 	suppressOutput: Schema.optional(Schema.Boolean),
 	systemMessage: Schema.optional(Schema.String),
-	hookSpecificOutput: Schema.optional(HookSpecificOutput)
+	terminalSequence: Schema.optional(Schema.String)
 }) {}
 
 // ---------------------------------------------------------------------------
@@ -72,18 +67,15 @@ export const passthrough = (): Output =>
 	new Output({ continue: undefined });
 
 /**
- * Attach additional context to the notification.
+ * Show a user-visible message for the notification.
  *
+ * @deprecated Notification does not support `additionalContext`; this helper
+ * emits `systemMessage` instead.
  * @category Decisions
  * @since 0.1.0
  */
 export const addContext = (additionalContext: string): Output =>
-	new Output({
-		hookSpecificOutput: new HookSpecificOutput({
-			hookEventName: 'Notification',
-			additionalContext
-		})
-	});
+	new Output({ systemMessage: additionalContext });
 
 // ---------------------------------------------------------------------------
 // define

@@ -2,7 +2,7 @@
  * TaskCreated hook event.
  *
  * Fires when a task is created via `TaskCreate` (agent-team context).
- * A handler can block task creation via `continue: false` with a reason.
+ * A handler can block task creation by exiting 2 with stderr feedback.
  * Does not support a matcher.
  * See https://code.claude.com/docs/en/hooks#taskcreated.
  *
@@ -13,7 +13,11 @@ import * as Schema from 'effect/Schema';
 
 import type { HookContext } from '../Context.ts';
 import { envelopeFields } from '../Envelope.ts';
-import type { HookDefinition } from '../Runner.ts';
+import {
+	stderrExit,
+	type HookDefinition,
+	type HookProcessOutput
+} from '../Runner.ts';
 
 export class Input extends Schema.Class<Input>('TaskCreatedInput')(
 	{
@@ -32,25 +36,35 @@ export class Output extends Schema.Class<Output>('TaskCreatedOutput')({
 	continue: Schema.optional(Schema.Boolean),
 	stopReason: Schema.optional(Schema.String),
 	suppressOutput: Schema.optional(Schema.Boolean),
-	systemMessage: Schema.optional(Schema.String)
+	systemMessage: Schema.optional(Schema.String),
+	terminalSequence: Schema.optional(Schema.String)
 }) {}
 
 export const allow = (): Output => new Output({ continue: undefined });
 
 /**
- * Block the task creation by setting `continue: false` with a reason.
+ * Block the task creation by exiting 2 with stderr feedback.
  *
  * @category Decisions
  * @since 0.1.0
  */
-export const block = (reason: string): Output =>
+export const block = (reason: string): HookProcessOutput =>
+	stderrExit(reason);
+
+/**
+ * Stop the teammate entirely after this hook runs.
+ *
+ * @category Decisions
+ * @since 0.1.0
+ */
+export const stopTeammate = (reason: string): Output =>
 	new Output({ continue: false, stopReason: reason });
 
 export const define = (config: {
 	readonly handler: (
 		input: Input
-	) => Effect.Effect<Output, unknown, HookContext.Service>;
-}): HookDefinition<Input, Output> => ({
+	) => Effect.Effect<Output | HookProcessOutput, unknown, HookContext.Service>;
+}): HookDefinition<Input, Output> => ({ 
 	event: 'TaskCreated',
 	inputSchema: Input,
 	outputSchema: Output,

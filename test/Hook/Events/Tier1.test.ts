@@ -30,6 +30,8 @@ const envelope = {
 	permission_mode: 'default'
 } as const;
 
+const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString);
+
 // ---------------------------------------------------------------------------
 // PostToolUse
 // ---------------------------------------------------------------------------
@@ -40,7 +42,7 @@ describe('Hook.PostToolUse', () => {
 			const hook = PostToolUse.define({
 				handler: () => Effect.succeed(PostToolUse.addContext('logged'))
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				...envelope,
 				hook_event_name: 'PostToolUse',
 				tool_name: 'Read',
@@ -79,7 +81,7 @@ describe('Hook.UserPromptSubmit', () => {
 						UserPromptSubmit.addContext('Current time: noon')
 					)
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				...envelope,
 				hook_event_name: 'UserPromptSubmit',
 				prompt: 'what time is it?'
@@ -117,7 +119,7 @@ describe('Hook.Notification', () => {
 			const hook = Notification.define({
 				handler: () => Effect.succeed(Notification.passthrough())
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				...envelope,
 				hook_event_name: 'Notification',
 				message: 'Permission needed',
@@ -150,7 +152,7 @@ describe('Hook.Stop', () => {
 			const hook = Stop.define({
 				handler: () => Effect.succeed(Stop.block('keep going'))
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				...envelope,
 				hook_event_name: 'Stop',
 				stop_hook_active: false
@@ -175,7 +177,7 @@ describe('Hook.SubagentStop', () => {
 			const hook = SubagentStop.define({
 				handler: () => Effect.succeed(SubagentStop.allowStop())
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				...envelope,
 				hook_event_name: 'SubagentStop',
 				stop_hook_active: false,
@@ -203,7 +205,7 @@ describe('Hook.SessionStart', () => {
 						SessionStart.addContext('Project uses Effect v4')
 					)
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				session_id: 'test-session',
 				transcript_path: '/tmp/t.jsonl',
 				cwd: '/tmp/ws',
@@ -245,12 +247,12 @@ describe('Hook.SessionEnd', () => {
 			const hook = SessionEnd.define({
 				handler: () => Effect.succeed(SessionEnd.passthrough())
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				session_id: 'test-session',
 				transcript_path: '/tmp/t.jsonl',
 				cwd: '/tmp/ws',
 				hook_event_name: 'SessionEnd',
-				exit_reason: 'logout'
+				reason: 'logout'
 			});
 			const result = yield* Testing.runHookWithMockStdin(hook, json);
 			expect(result.exitCode).toBe(0);
@@ -268,7 +270,7 @@ describe('Hook.PreCompact', () => {
 			const hook = PreCompact.define({
 				handler: () => Effect.succeed(PreCompact.passthrough())
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				session_id: 'test-session',
 				transcript_path: '/tmp/t.jsonl',
 				cwd: '/tmp/ws',

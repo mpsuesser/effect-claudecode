@@ -17,10 +17,12 @@ export {
 	BearerAuthorization,
 	HttpMcpServer,
 	McpAuthorization,
+	McpOAuth,
 	McpServerConfig,
 	OAuth2Authorization,
 	SseMcpServer,
-	StdioMcpServer
+	StdioMcpServer,
+	WsMcpServer
 } from './Mcp/Schema.ts';
 
 // ---------------------------------------------------------------------------

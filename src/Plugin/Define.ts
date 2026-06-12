@@ -29,7 +29,10 @@ import * as Option from 'effect/Option';
 import * as Path from 'effect/Path';
 import * as Schema from 'effect/Schema';
 
-import { PluginWriteError } from '../Errors.ts';
+import {
+	PluginDefinitionError,
+	PluginWriteError
+} from '../Errors.ts';
 import {
 	type CommandFrontmatterInput,
 	type OutputStyleFrontmatterInput,
@@ -267,23 +270,35 @@ const normalizeMcpConfig = (
 
 const validateNamedFrontmatter = (
 	entryName: string,
-	frontmatterName: string,
+	frontmatterName: Option.Option<string>,
 	kind: string
 ): void => {
-	if (entryName !== frontmatterName) {
-		throw new Error(
-			`${kind} entry name "${entryName}" must match frontmatter name "${frontmatterName}"`
-		);
-	}
+	Option.map(frontmatterName, (name) => {
+		if (entryName !== name) {
+			throw new PluginDefinitionError({
+				kind,
+				entryName,
+				frontmatterName: name
+			});
+		}
+	});
 };
 
 const normalizeAgentEntry = (entry: PluginAgentEntry): PluginAgentEntry => {
-	validateNamedFrontmatter(entry.name, entry.frontmatter.name, 'agent');
+	validateNamedFrontmatter(
+		entry.name,
+		Option.some(entry.frontmatter.name),
+		'agent'
+	);
 	return entry;
 };
 
 const normalizeSkillEntry = (entry: PluginSkillEntry): PluginSkillEntry => {
-	validateNamedFrontmatter(entry.name, entry.frontmatter.name, 'skill');
+	validateNamedFrontmatter(
+		entry.name,
+		Option.fromNullishOr(entry.frontmatter.name),
+		'skill'
+	);
 	return entry;
 };
 
@@ -292,14 +307,14 @@ const normalizeOutputStyleEntry = (
 ): PluginOutputStyleEntry => {
 	validateNamedFrontmatter(
 		entry.name,
-		entry.frontmatter.name,
+		Option.fromNullishOr(entry.frontmatter.name),
 		'output style'
 	);
 	return entry;
 };
 
 const layoutError = (path: string, message: string): PluginWriteError =>
-	new PluginWriteError({ path, cause: new Error(message) });
+	new PluginWriteError({ path, cause: message });
 
 const resolveFlatEntryRelativePath = <Entry extends { readonly name: string; readonly path?: string }>(
 	options: {
@@ -314,7 +329,7 @@ const resolveFlatEntryRelativePath = <Entry extends { readonly name: string; rea
 		return Effect.succeed(options.entry.path);
 	}
 
-	const specs = pathSpecs(options.spec);
+	const specs = pathSpecs(Option.fromNullishOr(options.spec));
 	if (specs.length === 0) {
 		return Effect.succeed(`${options.defaultDir}/${options.entry.name}.md`);
 	}
@@ -351,7 +366,7 @@ const resolveSkillRelativePath = (
 		return Effect.succeed(options.entry.path);
 	}
 
-	const specs = pathSpecs(options.spec);
+	const specs = pathSpecs(Option.fromNullishOr(options.spec));
 	if (specs.length === 0) {
 		return Effect.succeed(`skills/${options.entry.name}/SKILL.md`);
 	}
@@ -393,8 +408,8 @@ const resolveConfigRelativePath = (
 
 	const specs = pathSpecs(
 		typeof options.spec === 'string' || Array.isArray(options.spec)
-			? options.spec
-			: undefined
+			? Option.some(options.spec)
+			: Option.none()
 	);
 	if (specs.length === 0) {
 		return Effect.succeed(Option.some(options.fallback));
@@ -518,21 +533,24 @@ const writeCommandEntries = (
 	Effect.gen(function* () {
 		if (entries.length === 0) return;
 		const path = yield* Path.Path;
-		yield* Effect.forEach(entries, (entry) =>
-			resolveFlatEntryRelativePath({
-				destDir: rootDir,
-				field: 'commands',
-				defaultDir: 'commands',
-				spec,
-				entry
-			}).pipe(
-				Effect.flatMap((relativePath) =>
-					writeFile(
-						path.join(rootDir, relativePath),
-						renderCommand(entry.frontmatter, entry.body)
+		yield* Effect.forEach(
+			entries,
+			(entry) =>
+				resolveFlatEntryRelativePath({
+					destDir: rootDir,
+					field: 'commands',
+					defaultDir: 'commands',
+					spec,
+					entry
+				}).pipe(
+					Effect.flatMap((relativePath) =>
+						writeFile(
+							path.join(rootDir, relativePath),
+							renderCommand(entry.frontmatter, entry.body)
+						)
 					)
-				)
-			)
+				),
+			{ concurrency: 1 }
 		);
 	});
 
@@ -553,18 +571,21 @@ const writeFlatNamedEntries = <
 	Effect.gen(function* () {
 		if (entries.length === 0) return;
 		const path = yield* Path.Path;
-		yield* Effect.forEach(entries, (entry) =>
-			resolveFlatEntryRelativePath({
-				destDir: rootDir,
-				field,
-				defaultDir,
-				spec,
-				entry
-			}).pipe(
-				Effect.flatMap((relativePath) =>
-					writeFile(path.join(rootDir, relativePath), renderEntry(entry))
-				)
-			)
+		yield* Effect.forEach(
+			entries,
+			(entry) =>
+				resolveFlatEntryRelativePath({
+					destDir: rootDir,
+					field,
+					defaultDir,
+					spec,
+					entry
+				}).pipe(
+					Effect.flatMap((relativePath) =>
+						writeFile(path.join(rootDir, relativePath), renderEntry(entry))
+					)
+				),
+			{ concurrency: 1 }
 		);
 	});
 
@@ -587,19 +608,22 @@ const writeSkillEntries = (
 	Effect.gen(function* () {
 		if (entries.length === 0) return;
 		const path = yield* Path.Path;
-		yield* Effect.forEach(entries, (entry) =>
-			resolveSkillRelativePath({
-				destDir: rootDir,
-				spec,
-				entry
-			}).pipe(
-				Effect.flatMap((relativePath) =>
-					writeFile(
-						path.join(rootDir, relativePath),
-						renderSkill(entry.frontmatter, entry.body)
+		yield* Effect.forEach(
+			entries,
+			(entry) =>
+				resolveSkillRelativePath({
+					destDir: rootDir,
+					spec,
+					entry
+				}).pipe(
+					Effect.flatMap((relativePath) =>
+						writeFile(
+							path.join(rootDir, relativePath),
+							renderSkill(entry.frontmatter, entry.body)
+						)
 					)
-				)
-			)
+				),
+			{ concurrency: 1 }
 		);
 	});
 
@@ -722,7 +746,7 @@ export const write = (
 			if (Option.isSome(hooksPath)) {
 				yield* writeFile(
 					path.join(destDir, hooksPath.value),
-					toJsonFileContent(definition.hooksConfig.value)
+					toJsonFileContent({ hooks: definition.hooksConfig.value })
 				);
 			}
 		}

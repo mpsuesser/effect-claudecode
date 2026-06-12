@@ -1,10 +1,9 @@
 /**
- * InstructionsLoaded hook event.
+ * Setup hook event.
  *
- * Fires when a CLAUDE.md or .claude/rules/*.md instruction file is loaded
- * into the session context. Observability-only — the hook's output is not
- * acted on. Supports a matcher on `load_reason`.
- * See https://code.claude.com/docs/en/hooks#instructionsloaded.
+ * Fires for explicit setup runs (`--init-only`, `-p --init`, or
+ * `-p --maintenance`). Supports a matcher on `trigger`.
+ * See https://code.claude.com/docs/en/hooks#setup.
  *
  * @since 0.1.0
  */
@@ -16,65 +15,55 @@ import { envelopeFields } from '../Envelope.ts';
 import * as Matcher from '../Matcher.ts';
 import type { HookDefinition } from '../Runner.ts';
 
-export const MemoryType = Schema.Literals([
-	'User',
-	'Project',
-	'Local',
-	'Managed',
-	'Nested'
-] as const);
+export const Trigger = Schema.Literals(['init', 'maintenance'] as const);
 
-export const LoadReason = Schema.Literals([
-	'session_start',
-	'nested_traversal',
-	'path_glob_match',
-	'include',
-	'compact'
-] as const);
-
-export class Input extends Schema.Class<Input>('InstructionsLoadedInput')(
+export class Input extends Schema.Class<Input>('SetupInput')(
 	{
 		...envelopeFields,
-		hook_event_name: Schema.Literal('InstructionsLoaded'),
-		file_path: Schema.String,
-		memory_type: MemoryType,
-		load_reason: LoadReason,
-		globs: Schema.optional(Schema.Array(Schema.String)),
-		trigger_file_path: Schema.optional(Schema.String),
-		parent_file_path: Schema.optional(Schema.String)
+		hook_event_name: Schema.Literal('Setup'),
+		trigger: Trigger
 	},
-	{ description: 'Input for the InstructionsLoaded hook event.' }
+	{ description: 'Input for the Setup hook event.' }
 ) {}
 
-export class Output extends Schema.Class<Output>('InstructionsLoadedOutput')({
+export class HookSpecificOutput extends Schema.Class<HookSpecificOutput>(
+	'SetupHookSpecificOutput'
+)({
+	hookEventName: Schema.Literal('Setup'),
+	additionalContext: Schema.optional(Schema.String)
+}) {}
+
+export class Output extends Schema.Class<Output>('SetupOutput')({
 	continue: Schema.optional(Schema.Boolean),
 	stopReason: Schema.optional(Schema.String),
 	suppressOutput: Schema.optional(Schema.Boolean),
 	systemMessage: Schema.optional(Schema.String),
 	terminalSequence: Schema.optional(Schema.String),
+	hookSpecificOutput: Schema.optional(HookSpecificOutput)
 }) {}
 
 export const passthrough = (): Output =>
 	new Output({ continue: undefined });
+
+export const addContext = (additionalContext: string): Output =>
+	new Output({
+		hookSpecificOutput: new HookSpecificOutput({
+			hookEventName: 'Setup',
+			additionalContext
+		})
+	});
 
 export const define = (config: {
 	readonly handler: (
 		input: Input
 	) => Effect.Effect<Output, unknown, HookContext.Service>;
 }): HookDefinition<Input, Output> => ({
-	event: 'InstructionsLoaded',
+	event: 'Setup',
 	inputSchema: Input,
 	outputSchema: Output,
 	handler: config.handler
 });
 
-/**
- * Build an InstructionsLoaded hook that only handles matching `load_reason`
- * values.
- *
- * @category Constructors
- * @since 0.1.0
- */
 export const onMatcher = (config: {
 	readonly matcher: string | RegExp;
 	readonly handler: (
@@ -87,7 +76,7 @@ export const onMatcher = (config: {
 	define({
 		handler: Matcher.handleMatcher({
 			matcher: config.matcher,
-			select: (input) => input.load_reason,
+			select: (input) => input.trigger,
 			onMatch: config.handler,
 			onMismatch:
 				config.onMismatch ?? (() => Effect.succeed(passthrough()))

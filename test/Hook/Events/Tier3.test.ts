@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from '@effect/vitest';
 import * as Effect from 'effect/Effect';
+import * as Schema from 'effect/Schema';
 
 import * as Elicitation from '../../../src/Hook/Events/Elicitation.ts';
 import * as ElicitationResult from '../../../src/Hook/Events/ElicitationResult.ts';
@@ -26,28 +27,28 @@ const baseWithMode = {
 	permission_mode: 'default'
 } as const;
 
+const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString);
+
 // ---------------------------------------------------------------------------
 // TaskCreated / TaskCompleted
 // ---------------------------------------------------------------------------
 
 describe('Hook.TaskCreated', () => {
-	it.effect('block() sets continue: false with a reason', () =>
+	it.effect('block() exits 2 with stderr feedback', () =>
 		Effect.gen(function* () {
 			const hook = TaskCreated.define({
 				handler: () => Effect.succeed(TaskCreated.block('quota exceeded'))
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				...baseWithMode,
 				hook_event_name: 'TaskCreated',
 				task_id: 't-1',
 				task_subject: 'Write tests'
 			});
 			const result = yield* Testing.runHookWithMockStdin(hook, json);
-			expect(result.exitCode).toBe(0);
-			expect(result.output).toMatchObject({
-				continue: false,
-				stopReason: 'quota exceeded'
-			});
+			expect(result.exitCode).toBe(2);
+			expect(result.stderr).toBe('quota exceeded');
+			expect(result.output).toBeUndefined();
 		})
 	);
 });
@@ -58,7 +59,7 @@ describe('Hook.TaskCompleted', () => {
 			const hook = TaskCompleted.define({
 				handler: () => Effect.succeed(TaskCompleted.allow())
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				...baseWithMode,
 				hook_event_name: 'TaskCompleted',
 				task_id: 't-2',
@@ -82,15 +83,16 @@ describe('Hook.TeammateIdle', () => {
 				handler: () =>
 					Effect.succeed(TeammateIdle.keepWorking('still tasks queued'))
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				...baseWithMode,
 				hook_event_name: 'TeammateIdle',
 				team_name: 'frontend',
 				teammate_name: 'Bob'
 			});
 			const result = yield* Testing.runHookWithMockStdin(hook, json);
-			expect(result.exitCode).toBe(0);
-			expect(result.output).toMatchObject({ continue: false });
+			expect(result.exitCode).toBe(2);
+			expect(result.stderr).toBe('still tasks queued');
+			expect(result.output).toBeUndefined();
 		})
 	);
 });
@@ -100,25 +102,20 @@ describe('Hook.TeammateIdle', () => {
 // ---------------------------------------------------------------------------
 
 describe('Hook.WorktreeCreate', () => {
-	it.effect('created() returns a worktree path in hookSpecificOutput', () =>
+	it.effect('created() writes a raw worktree path to stdout', () =>
 		Effect.gen(function* () {
 			const hook = WorktreeCreate.define({
 				handler: () => Effect.succeed(WorktreeCreate.created('/tmp/wt-1'))
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				...base,
 				hook_event_name: 'WorktreeCreate',
-				worktree_path: '/tmp/wt-1',
-				git_repo_path: '/tmp/repo'
+				name: 'feature-auth'
 			});
 			const result = yield* Testing.runHookWithMockStdin(hook, json);
 			expect(result.exitCode).toBe(0);
-			expect(result.output).toMatchObject({
-				hookSpecificOutput: {
-					hookEventName: 'WorktreeCreate',
-					worktreePath: '/tmp/wt-1'
-				}
-			});
+			expect(result.stdout).toBe('/tmp/wt-1\n');
+			expect(result.output).toBeUndefined();
 		})
 	);
 });
@@ -129,7 +126,7 @@ describe('Hook.WorktreeRemove', () => {
 			const hook = WorktreeRemove.define({
 				handler: () => Effect.succeed(WorktreeRemove.passthrough())
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				...base,
 				hook_event_name: 'WorktreeRemove',
 				worktree_path: '/tmp/wt-1'
@@ -153,10 +150,12 @@ describe('Hook.Elicitation', () => {
 						Elicitation.accept({ username: 'alice' })
 					)
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				...baseWithMode,
 				hook_event_name: 'Elicitation',
-				mcp_server_name: 'memory'
+				mcp_server_name: 'memory',
+				message: 'Please provide credentials',
+				mode: 'form'
 			});
 			const result = yield* Testing.runHookWithMockStdin(hook, json);
 			expect(result.exitCode).toBe(0);
@@ -184,11 +183,12 @@ describe('Hook.ElicitationResult', () => {
 						ElicitationResult.accept({ override: true })
 					)
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				...baseWithMode,
 				hook_event_name: 'ElicitationResult',
 				mcp_server_name: 'memory',
-				user_response: { choice: 'yes' }
+				action: 'accept',
+				content: { choice: 'yes' }
 			});
 			const result = yield* Testing.runHookWithMockStdin(hook, json);
 			expect(result.exitCode).toBe(0);

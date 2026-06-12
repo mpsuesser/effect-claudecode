@@ -8,14 +8,18 @@
 import * as Schema from 'effect/Schema';
 
 // Tier 1
+import * as MessageDisplay from './MessageDisplay.ts';
 import * as Notification from './Notification.ts';
+import * as PostToolBatch from './PostToolBatch.ts';
 import * as PostToolUse from './PostToolUse.ts';
 import * as PreCompact from './PreCompact.ts';
 import * as PreToolUse from './PreToolUse.ts';
 import * as SessionEnd from './SessionEnd.ts';
 import * as SessionStart from './SessionStart.ts';
+import * as Setup from './Setup.ts';
 import * as Stop from './Stop.ts';
 import * as SubagentStop from './SubagentStop.ts';
+import * as UserPromptExpansion from './UserPromptExpansion.ts';
 import * as UserPromptSubmit from './UserPromptSubmit.ts';
 
 // Tier 2
@@ -45,14 +49,18 @@ import * as WorktreeRemove from './WorktreeRemove.ts';
 
 export {
 	// Tier 1
+	MessageDisplay,
 	Notification,
+	PostToolBatch,
 	PostToolUse,
 	PreCompact,
 	PreToolUse,
 	SessionEnd,
 	SessionStart,
+	Setup,
 	Stop,
 	SubagentStop,
+	UserPromptExpansion,
 	UserPromptSubmit,
 	// Tier 2
 	ConfigChange,
@@ -76,7 +84,7 @@ export {
 };
 
 // ---------------------------------------------------------------------------
-// Unions (all 26 events)
+// Unions (all 30 events)
 // ---------------------------------------------------------------------------
 
 /**
@@ -88,10 +96,14 @@ export {
  */
 export const HookInput = Schema.Union([
 	// Tier 1
+	Setup.Input,
 	PreToolUse.Input,
 	PostToolUse.Input,
+	PostToolBatch.Input,
 	UserPromptSubmit.Input,
+	UserPromptExpansion.Input,
 	Notification.Input,
+	MessageDisplay.Input,
 	Stop.Input,
 	SubagentStop.Input,
 	SessionStart.Input,

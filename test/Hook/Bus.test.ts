@@ -24,7 +24,7 @@ const fileChanged = (filePath: string) =>
 		cwd: '/repo',
 		hook_event_name: 'FileChanged',
 		file_path: filePath,
-		change_type: 'modified'
+		event: 'change'
 	});
 
 const sessionStart = () =>

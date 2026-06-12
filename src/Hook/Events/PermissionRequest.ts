@@ -28,20 +28,28 @@ import type { HookDefinition } from '../Runner.ts';
  * @category Schemas
  * @since 0.1.0
  */
+export class PermissionRule extends Schema.Class<PermissionRule>(
+	'PermissionRule'
+)({
+	toolName: Schema.String,
+	ruleContent: Schema.optional(Schema.String)
+}) {}
+
+const PermissionBehavior = Schema.Literals(['allow', 'deny', 'ask'] as const);
+const PermissionDestination = Schema.Literals([
+	'session',
+	'localSettings',
+	'projectSettings',
+	'userSettings'
+] as const);
+
 export class PermissionSuggestion extends Schema.Class<PermissionSuggestion>(
 	'PermissionSuggestion'
 )({
 	type: Schema.String,
-	rules: Schema.optional(Schema.Array(Schema.String)),
-	behavior: Schema.optional(Schema.Literals(['allow', 'deny', 'ask'])),
-	destination: Schema.optional(
-		Schema.Literals([
-			'session',
-			'localSettings',
-			'projectSettings',
-			'userSettings'
-		])
-	)
+	rules: Schema.optional(Schema.Array(PermissionRule)),
+	behavior: Schema.optional(PermissionBehavior),
+	destination: Schema.optional(PermissionDestination)
 }) {}
 
 export class Input extends Schema.Class<Input>('PermissionRequestInput')(
@@ -68,25 +76,45 @@ export class Input extends Schema.Class<Input>('PermissionRequestInput')(
  * @category Schemas
  * @since 0.1.0
  */
-export class PermissionUpdate extends Schema.Class<PermissionUpdate>(
-	'PermissionUpdate'
+export class RulePermissionUpdate extends Schema.Class<RulePermissionUpdate>(
+	'RulePermissionUpdate'
 )({
-	type: Schema.Literals([
-		'addRules',
-		'replaceRules',
-		'removeRules',
-		'setMode',
-		'addDirectories',
-		'removeDirectories'
-	]),
-	behavior: Schema.optional(Schema.Literals(['allow', 'deny', 'ask'])),
-	destination: Schema.Literals([
-		'session',
-		'localSettings',
-		'projectSettings',
-		'userSettings'
-	])
+	type: Schema.Literals(['addRules', 'replaceRules', 'removeRules'] as const),
+	rules: Schema.Array(PermissionRule),
+	behavior: PermissionBehavior,
+	destination: PermissionDestination
 }) {}
+
+export class ModePermissionUpdate extends Schema.Class<ModePermissionUpdate>(
+	'ModePermissionUpdate'
+)({
+	type: Schema.Literal('setMode'),
+	mode: Schema.Literals([
+		'default',
+		'auto',
+		'acceptEdits',
+		'dontAsk',
+		'bypassPermissions',
+		'plan'
+	] as const),
+	destination: PermissionDestination
+}) {}
+
+export class DirectoryPermissionUpdate extends Schema.Class<DirectoryPermissionUpdate>(
+	'DirectoryPermissionUpdate'
+)({
+	type: Schema.Literals(['addDirectories', 'removeDirectories'] as const),
+	directories: Schema.Array(Schema.String),
+	destination: PermissionDestination
+}) {}
+
+export const PermissionUpdate = Schema.Union([
+	RulePermissionUpdate,
+	ModePermissionUpdate,
+	DirectoryPermissionUpdate
+]).annotate({ identifier: 'PermissionUpdate' });
+
+export type PermissionUpdate = typeof PermissionUpdate.Type;
 
 export class PermissionDecision extends Schema.Class<PermissionDecision>(
 	'PermissionRequestDecision'
@@ -96,7 +124,8 @@ export class PermissionDecision extends Schema.Class<PermissionDecision>(
 		Schema.Record(Schema.String, Schema.Unknown)
 	),
 	updatedPermissions: Schema.optional(Schema.Array(PermissionUpdate)),
-	message: Schema.optional(Schema.String)
+	message: Schema.optional(Schema.String),
+	interrupt: Schema.optional(Schema.Boolean)
 }) {}
 
 export class HookSpecificOutput extends Schema.Class<HookSpecificOutput>(
@@ -111,6 +140,7 @@ export class Output extends Schema.Class<Output>('PermissionRequestOutput')({
 	stopReason: Schema.optional(Schema.String),
 	suppressOutput: Schema.optional(Schema.Boolean),
 	systemMessage: Schema.optional(Schema.String),
+	terminalSequence: Schema.optional(Schema.String),
 	hookSpecificOutput: Schema.optional(HookSpecificOutput)
 }) {}
 
@@ -142,13 +172,17 @@ export const allow = (options?: {
 export const passthrough = (): Output =>
 	new Output({ continue: undefined });
 
-export const deny = (message: string): Output =>
+export const deny = (
+	message: string,
+	options?: { readonly interrupt?: boolean }
+): Output =>
 	new Output({
 		hookSpecificOutput: new HookSpecificOutput({
 			hookEventName: 'PermissionRequest',
 			decision: new PermissionDecision({
 				behavior: 'deny',
-				message
+				message,
+				interrupt: options?.interrupt
 			})
 		})
 	});

@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from '@effect/vitest';
 import * as Effect from 'effect/Effect';
+import * as Schema from 'effect/Schema';
 
 import * as ConfigChange from '../../../src/Hook/Events/ConfigChange.ts';
 import * as CwdChanged from '../../../src/Hook/Events/CwdChanged.ts';
@@ -29,6 +30,8 @@ const envelopeWithMode = {
 	permission_mode: 'default'
 } as const;
 
+const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString);
+
 // ---------------------------------------------------------------------------
 // PostCompact
 // ---------------------------------------------------------------------------
@@ -39,7 +42,7 @@ describe('Hook.PostCompact', () => {
 			const hook = PostCompact.define({
 				handler: () => Effect.succeed(PostCompact.passthrough())
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				...baseEnvelope,
 				hook_event_name: 'PostCompact',
 				trigger: 'auto'
@@ -65,7 +68,7 @@ describe('Hook.PermissionRequest', () => {
 						})
 					)
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				...envelopeWithMode,
 				hook_event_name: 'PermissionRequest',
 				tool_name: 'Bash',
@@ -99,7 +102,7 @@ describe('Hook.PermissionDenied', () => {
 			const hook = PermissionDenied.define({
 				handler: () => Effect.succeed(PermissionDenied.retry())
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				...envelopeWithMode,
 				hook_event_name: 'PermissionDenied',
 				tool_name: 'Bash',
@@ -126,7 +129,7 @@ describe('Hook.PostToolUseFailure', () => {
 				handler: () =>
 					Effect.succeed(PostToolUseFailure.addContext('Try again'))
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				...envelopeWithMode,
 				hook_event_name: 'PostToolUseFailure',
 				tool_name: 'Bash',
@@ -155,7 +158,7 @@ describe('Hook.SubagentStart', () => {
 						SubagentStart.addContext('preloaded state')
 					)
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				...baseEnvelope,
 				hook_event_name: 'SubagentStart',
 				agent_id: 'a-1',
@@ -177,10 +180,10 @@ describe('Hook.ConfigChange', () => {
 			const hook = ConfigChange.define({
 				handler: () => Effect.succeed(ConfigChange.block('locked'))
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				...baseEnvelope,
 				hook_event_name: 'ConfigChange',
-				config_source: 'project_settings'
+				source: 'project_settings'
 			});
 			const result = yield* Testing.runHookWithMockStdin(hook, json);
 			expect(result.exitCode).toBe(0);
@@ -202,11 +205,11 @@ describe('Hook.InstructionsLoaded', () => {
 			const hook = InstructionsLoaded.define({
 				handler: () => Effect.succeed(InstructionsLoaded.passthrough())
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				...baseEnvelope,
 				hook_event_name: 'InstructionsLoaded',
 				file_path: '/repo/sub/CLAUDE.md',
-				memory_type: 'Nested',
+				memory_type: 'Project',
 				load_reason: 'nested_traversal'
 			});
 			const result = yield* Testing.runHookWithMockStdin(hook, json);
@@ -225,10 +228,10 @@ describe('Hook.StopFailure', () => {
 			const hook = StopFailure.define({
 				handler: () => Effect.succeed(StopFailure.passthrough())
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				...baseEnvelope,
 				hook_event_name: 'StopFailure',
-				error_type: 'rate_limit'
+				error: 'rate_limit'
 			});
 			const result = yield* Testing.runHookWithMockStdin(hook, json);
 			expect(result.exitCode).toBe(0);
@@ -241,14 +244,16 @@ describe('Hook.StopFailure', () => {
 // ---------------------------------------------------------------------------
 
 describe('Hook.CwdChanged', () => {
-	it.effect('decodes envelope-only payload', () =>
+	it.effect('decodes cwd transition payload', () =>
 		Effect.gen(function* () {
 			const hook = CwdChanged.define({
 				handler: () => Effect.succeed(CwdChanged.passthrough())
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				...baseEnvelope,
-				hook_event_name: 'CwdChanged'
+				hook_event_name: 'CwdChanged',
+				old_cwd: '/tmp/ws',
+				new_cwd: '/tmp/ws/src'
 			});
 			const result = yield* Testing.runHookWithMockStdin(hook, json);
 			expect(result.exitCode).toBe(0);
@@ -266,11 +271,11 @@ describe('Hook.FileChanged', () => {
 			const hook = FileChanged.define({
 				handler: () => Effect.succeed(FileChanged.passthrough())
 			});
-			const json = JSON.stringify({
+			const json = encodeJson({
 				...baseEnvelope,
 				hook_event_name: 'FileChanged',
 				file_path: '/repo/.env',
-				change_type: 'modified'
+				event: 'change'
 			});
 			const result = yield* Testing.runHookWithMockStdin(hook, json);
 			expect(result.exitCode).toBe(0);

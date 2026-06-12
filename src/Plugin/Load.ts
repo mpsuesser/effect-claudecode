@@ -133,6 +133,30 @@ const readOptionalManifest = (
 		)
 	);
 
+class WrappedHooksFile extends Schema.Class<WrappedHooksFile>(
+	'WrappedHooksFile'
+)({
+	hooks: HooksSection
+}) {}
+
+const HooksFile = Schema.Union([HooksSection, WrappedHooksFile]).annotate({
+	identifier: 'PluginHooksFile',
+	description:
+		'Plugin hooks file shape, accepting documented wrapped files and legacy bare hook sections.'
+});
+
+const unwrapHooksFile = (
+	hooksFile: Schema.Schema.Type<typeof HooksFile>
+): Schema.Schema.Type<typeof HooksSection> =>
+	hooksFile instanceof WrappedHooksFile ? hooksFile.hooks : hooksFile;
+
+const decodeHooksFile = (
+	input: unknown
+): Effect.Effect<Schema.Schema.Type<typeof HooksSection>, Schema.SchemaError> =>
+	Schema.decodeUnknownEffect(HooksFile)(input).pipe(
+		Effect.map(unwrapHooksFile)
+	);
+
 const readOptionalHooks = (
 	path: string
 ): Effect.Effect<
@@ -147,7 +171,7 @@ const readOptionalHooks = (
 				: Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(
 						maybeContent.value
 				  ).pipe(
-						Effect.flatMap(Schema.decodeUnknownEffect(HooksSection)),
+						Effect.flatMap(decodeHooksFile),
 						Effect.map(Option.some),
 						Effect.mapError(
 							(cause) => new PluginLoadError({ path, cause })
@@ -159,7 +183,7 @@ const readOptionalHooks = (
 const missingDeclaredPath = (path: string): PluginLoadError =>
 	new PluginLoadError({
 		path,
-		cause: new Error('Declared manifest path does not exist')
+		cause: 'Declared manifest path does not exist'
 	});
 
 const readStringFile = (
@@ -175,11 +199,15 @@ const readStringFile = (
 
 const readHooksFile = (
 	path: string
-): Effect.Effect<Schema.Schema.Type<typeof HooksSection>, PluginLoadError, FileSystem.FileSystem> =>
+): Effect.Effect<
+	Schema.Schema.Type<typeof HooksSection>,
+	PluginLoadError,
+	FileSystem.FileSystem
+> =>
 	readStringFile(path).pipe(
 		Effect.flatMap((content) =>
 			Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(content).pipe(
-				Effect.flatMap(Schema.decodeUnknownEffect(HooksSection)),
+				Effect.flatMap(decodeHooksFile),
 				Effect.mapError((cause) => new PluginLoadError({ path, cause }))
 			)
 		)
@@ -234,14 +262,18 @@ const markdownFilePaths = (
 	);
 
 const relativeManifestPaths = (
-	spec: string | ReadonlyArray<string> | undefined
+	spec: Option.Option<string | ReadonlyArray<string>>
 ): ReadonlyArray<string> => pathSpecs(spec);
 
 const expandMarkdownPathSpec = (options: {
 	readonly rootDir: string;
-	readonly spec: string | ReadonlyArray<string> | undefined;
+	readonly spec: Option.Option<string | ReadonlyArray<string>>;
 	readonly fallbackDir: string;
-}): Effect.Effect<ReadonlyArray<string>, PluginLoadError, FileSystem.FileSystem | Path.Path> =>
+}): Effect.Effect<
+	ReadonlyArray<string>,
+	PluginLoadError,
+	FileSystem.FileSystem | Path.Path
+> =>
 	Effect.gen(function* () {
 		const path = yield* Path.Path;
 		const declared = relativeManifestPaths(options.spec);
@@ -251,16 +283,19 @@ const expandMarkdownPathSpec = (options: {
 			return markdownFilePaths(dirPath, entries, path);
 		}
 
-		const resolved = yield* Effect.forEach(declared, (relativePath) =>
-			Effect.gen(function* () {
-				const absolutePath = path.join(options.rootDir, relativePath);
-				yield* requireExistingPath(absolutePath);
-				if (isMarkdownFilePath(relativePath)) {
-					return [absolutePath];
-				}
-				const entries = yield* readDirectoryIfExists(absolutePath);
-				return markdownFilePaths(absolutePath, entries, path);
-			})
+		const resolved = yield* Effect.forEach(
+			declared,
+			(relativePath) =>
+				Effect.gen(function* () {
+					const absolutePath = path.join(options.rootDir, relativePath);
+					yield* requireExistingPath(absolutePath);
+					if (isMarkdownFilePath(relativePath)) {
+						return [absolutePath];
+					}
+					const entries = yield* readDirectoryIfExists(absolutePath);
+					return markdownFilePaths(absolutePath, entries, path);
+				}),
+			{ concurrency: 1 }
 		);
 
 		return listSorted(resolved.flat());
@@ -268,69 +303,91 @@ const expandMarkdownPathSpec = (options: {
 
 const expandSkillPathSpec = (options: {
 	readonly rootDir: string;
-	readonly spec: string | ReadonlyArray<string> | undefined;
+	readonly spec: Option.Option<string | ReadonlyArray<string>>;
 	readonly fallbackDir: string;
 }): Effect.Effect<ReadonlyArray<string>, PluginLoadError, FileSystem.FileSystem | Path.Path> =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem;
 		const path = yield* Path.Path;
 		const declared = relativeManifestPaths(options.spec);
-		if (declared.length === 0) {
-			const dirPath = path.join(options.rootDir, options.fallbackDir);
-			const entries = yield* readDirectoryIfExists(dirPath);
-			const discovered = yield* Effect.forEach(entries, (entry) =>
+		const defaultDirPath = path.join(options.rootDir, options.fallbackDir);
+		const defaultEntries = yield* readDirectoryIfExists(defaultDirPath);
+		const defaultDiscovered = yield* Effect.forEach(
+			defaultEntries,
+			(entry) =>
 				Effect.gen(function* () {
-					const skillPath = path.join(dirPath, entry, 'SKILL.md');
+					const skillPath = path.join(defaultDirPath, entry, 'SKILL.md');
 					const exists = yield* fs.exists(skillPath).pipe(
 						Effect.mapError(
 							(cause) => new PluginLoadError({ path: skillPath, cause })
 						)
 					);
 					return exists ? Option.some(skillPath) : Option.none<string>();
-				})
+				}),
+			{ concurrency: 1 }
+		);
+		const defaultSkillPaths = Arr.getSomes(defaultDiscovered);
+
+		if (declared.length === 0) {
+			if (defaultSkillPaths.length > 0) {
+				return listSorted(defaultSkillPaths);
+			}
+			const rootSkill = path.join(options.rootDir, 'SKILL.md');
+			const rootSkillExists = yield* fs.exists(rootSkill).pipe(
+				Effect.mapError(
+					(cause) => new PluginLoadError({ path: rootSkill, cause })
+				)
 			);
-			return listSorted(Arr.getSomes(discovered));
+			return rootSkillExists ? [rootSkill] : [];
 		}
 
-		const resolved = yield* Effect.forEach(declared, (relativePath) =>
-			Effect.gen(function* () {
-				const absolutePath = path.join(options.rootDir, relativePath);
-				yield* requireExistingPath(absolutePath);
-				if (isSkillFilePath(relativePath)) {
-					return [absolutePath];
-				}
-				const entries = yield* readDirectoryIfExists(absolutePath);
-				const directSkill = path.join(absolutePath, 'SKILL.md');
-				const directExists = yield* fs.exists(directSkill).pipe(
-					Effect.mapError(
-						(cause) => new PluginLoadError({ path: directSkill, cause })
-					)
-				);
-				const nestedSkills = yield* Effect.forEach(entries, (entry) =>
-					Effect.gen(function* () {
-						const nestedSkill = path.join(absolutePath, entry, 'SKILL.md');
-						const exists = yield* fs.exists(nestedSkill).pipe(
-							Effect.mapError(
-								(cause) =>
-									new PluginLoadError({ path: nestedSkill, cause })
-							)
-						);
-						return exists ? Option.some(nestedSkill) : Option.none<string>();
-					})
-				);
-				return listSorted([
-					...(directExists ? [directSkill] : []),
-					...Arr.getSomes(nestedSkills)
-				]);
-			})
+		const resolved = yield* Effect.forEach(
+			declared,
+			(relativePath) =>
+				Effect.gen(function* () {
+					const absolutePath = path.join(options.rootDir, relativePath);
+					yield* requireExistingPath(absolutePath);
+					if (isSkillFilePath(relativePath)) {
+						return [absolutePath];
+					}
+					const entries = yield* readDirectoryIfExists(absolutePath);
+					const directSkill = path.join(absolutePath, 'SKILL.md');
+					const directExists = yield* fs.exists(directSkill).pipe(
+						Effect.mapError(
+							(cause) => new PluginLoadError({ path: directSkill, cause })
+						)
+					);
+					const nestedSkills = yield* Effect.forEach(
+						entries,
+						(entry) =>
+							Effect.gen(function* () {
+								const nestedSkill = path.join(absolutePath, entry, 'SKILL.md');
+								const exists = yield* fs.exists(nestedSkill).pipe(
+									Effect.mapError(
+										(cause) =>
+											new PluginLoadError({ path: nestedSkill, cause })
+									)
+								);
+								return exists
+									? Option.some(nestedSkill)
+									: Option.none<string>();
+							}),
+						{ concurrency: 1 }
+					);
+					return listSorted([
+						...(directExists ? [directSkill] : []),
+						...Arr.getSomes(nestedSkills)
+					]);
+				}),
+			{ concurrency: 1 }
 		);
 
-		return listSorted(resolved.flat());
+		return listSorted([...defaultSkillPaths, ...resolved.flat()]);
 	});
 
 const expandJsonPathSpec = (options: {
 	readonly rootDir: string;
-	readonly spec: string | ReadonlyArray<string> | undefined;
+	readonly spec: Option.Option<string | ReadonlyArray<string>>;
 	readonly fallbackPath: string;
 }): Effect.Effect<ReadonlyArray<string>, PluginLoadError, FileSystem.FileSystem | Path.Path> =>
 	Effect.gen(function* () {
@@ -342,20 +399,23 @@ const expandJsonPathSpec = (options: {
 			return Option.isSome(maybeContent) ? [fallback] : [];
 		}
 
-		return yield* Effect.forEach(declared, (relativePath) =>
-			Effect.gen(function* () {
-				const absolutePath = path.join(options.rootDir, relativePath);
-				yield* requireExistingPath(absolutePath);
-				if (!isJsonFilePath(relativePath)) {
-					return yield* Effect.fail(
-						new PluginLoadError({
-							path: absolutePath,
-							cause: new Error('Manifest JSON config path must point to a file')
-						})
-					);
-				}
-				return absolutePath;
-			})
+		return yield* Effect.forEach(
+			declared,
+			(relativePath) =>
+				Effect.gen(function* () {
+					const absolutePath = path.join(options.rootDir, relativePath);
+					yield* requireExistingPath(absolutePath);
+					if (!isJsonFilePath(relativePath)) {
+						return yield* Effect.fail(
+							new PluginLoadError({
+								path: absolutePath,
+								cause: 'Manifest JSON config path must point to a file'
+							})
+						);
+					}
+					return absolutePath;
+				}),
+			{ concurrency: 1 }
 		);
 	});
 
@@ -412,15 +472,21 @@ const inferredManifest = (input: {
 		onNone: () => ({ name: input.pluginName }),
 		onSome: (manifest) => ({
 			name: manifest.name,
+			$schema: manifest.$schema,
 			version: manifest.version,
 			description: manifest.description,
+			displayName: manifest.displayName,
+			defaultEnabled: manifest.defaultEnabled,
 			author: manifest.author,
 			homepage: manifest.homepage,
 			repository: manifest.repository,
 			license: manifest.license,
 			keywords: manifest.keywords,
+			dependencies: manifest.dependencies,
+			experimental: manifest.experimental,
 			userConfig: manifest.userConfig,
-			channels: manifest.channels
+			channels: manifest.channels,
+			lspServers: manifest.lspServers
 		})
 	});
 
@@ -471,16 +537,21 @@ const loadCommandEntries = (
 > =>
 	Effect.gen(function* () {
 		const path = yield* Path.Path;
-		return yield* Effect.forEach(paths, (filePath) =>
-			parseCommandFile(filePath).pipe(
-				Effect.map((parsed) => ({
-					name: path.basename(filePath, '.md'),
-					path: path.relative(rootDir, filePath),
-					frontmatter: parsed.frontmatter,
-					body: parsed.body
-				})),
-				Effect.mapError((cause) => new PluginLoadError({ path: filePath, cause }))
-			)
+		return yield* Effect.forEach(
+			paths,
+			(filePath) =>
+				parseCommandFile(filePath).pipe(
+					Effect.map((parsed) => ({
+						name: path.basename(filePath, '.md'),
+						path: path.relative(rootDir, filePath),
+						frontmatter: parsed.frontmatter,
+						body: parsed.body
+					})),
+					Effect.mapError(
+						(cause) => new PluginLoadError({ path: filePath, cause })
+					)
+				),
+			{ concurrency: 1 }
 		);
 	});
 
@@ -494,16 +565,21 @@ const loadAgentEntries = (
 > =>
 	Effect.gen(function* () {
 		const path = yield* Path.Path;
-		return yield* Effect.forEach(paths, (filePath) =>
-			parseSubagentFile(filePath).pipe(
-				Effect.map((parsed) => ({
-					name: parsed.frontmatter.name,
-					path: path.relative(rootDir, filePath),
-					frontmatter: parsed.frontmatter,
-					body: parsed.body
-				})),
-				Effect.mapError((cause) => new PluginLoadError({ path: filePath, cause }))
-			)
+		return yield* Effect.forEach(
+			paths,
+			(filePath) =>
+				parseSubagentFile(filePath).pipe(
+					Effect.map((parsed) => ({
+						name: parsed.frontmatter.name,
+						path: path.relative(rootDir, filePath),
+						frontmatter: parsed.frontmatter,
+						body: parsed.body
+					})),
+					Effect.mapError(
+						(cause) => new PluginLoadError({ path: filePath, cause })
+					)
+				),
+			{ concurrency: 1 }
 		);
 	});
 
@@ -517,16 +593,22 @@ const loadSkillEntries = (
 > =>
 	Effect.gen(function* () {
 		const path = yield* Path.Path;
-		return yield* Effect.forEach(paths, (filePath) =>
-			parseSkillFile(filePath).pipe(
-				Effect.map((parsed) => ({
-					name: parsed.frontmatter.name,
-					path: path.relative(rootDir, filePath),
-					frontmatter: parsed.frontmatter,
-					body: parsed.body
-				})),
-				Effect.mapError((cause) => new PluginLoadError({ path: filePath, cause }))
-			)
+		return yield* Effect.forEach(
+			paths,
+			(filePath) =>
+				parseSkillFile(filePath).pipe(
+					Effect.map((parsed) => ({
+						name:
+							parsed.frontmatter.name ?? path.basename(path.dirname(filePath)),
+						path: path.relative(rootDir, filePath),
+						frontmatter: parsed.frontmatter,
+						body: parsed.body
+					})),
+					Effect.mapError(
+						(cause) => new PluginLoadError({ path: filePath, cause })
+					)
+				),
+			{ concurrency: 1 }
 		);
 	});
 
@@ -540,16 +622,21 @@ const loadOutputStyleEntries = (
 > =>
 	Effect.gen(function* () {
 		const path = yield* Path.Path;
-		return yield* Effect.forEach(paths, (filePath) =>
-			parseOutputStyleFile(filePath).pipe(
-				Effect.map((parsed) => ({
-					name: parsed.frontmatter.name,
-					path: path.relative(rootDir, filePath),
-					frontmatter: parsed.frontmatter,
-					body: parsed.body
-				})),
-				Effect.mapError((cause) => new PluginLoadError({ path: filePath, cause }))
-			)
+		return yield* Effect.forEach(
+			paths,
+			(filePath) =>
+				parseOutputStyleFile(filePath).pipe(
+					Effect.map((parsed) => ({
+						name: parsed.frontmatter.name ?? path.basename(filePath, '.md'),
+						path: path.relative(rootDir, filePath),
+						frontmatter: parsed.frontmatter,
+						body: parsed.body
+					})),
+					Effect.mapError(
+						(cause) => new PluginLoadError({ path: filePath, cause })
+					)
+				),
+			{ concurrency: 1 }
 		);
 	});
 
@@ -595,22 +682,22 @@ export const scan = (
 		const manifest = Option.getOrUndefined(sourceManifest);
 		const commandPaths = yield* expandMarkdownPathSpec({
 			rootDir,
-			spec: manifest?.commands,
+			spec: Option.fromNullishOr(manifest?.commands),
 			fallbackDir: 'commands'
 		});
 		const agentPaths = yield* expandMarkdownPathSpec({
 			rootDir,
-			spec: manifest?.agents,
+			spec: Option.fromNullishOr(manifest?.agents),
 			fallbackDir: 'agents'
 		});
 		const skillPaths = yield* expandSkillPathSpec({
 			rootDir,
-			spec: manifest?.skills,
+			spec: Option.fromNullishOr(manifest?.skills),
 			fallbackDir: 'skills'
 		});
 		const outputStylePaths = yield* expandMarkdownPathSpec({
 			rootDir,
-			spec: manifest?.outputStyles,
+			spec: Option.fromNullishOr(manifest?.outputStyles),
 			fallbackDir: 'output-styles'
 		});
 		const inlineHooksConfig = inlineHooksConfigFromManifest(manifest);
@@ -620,8 +707,8 @@ export const scan = (
 					rootDir,
 					spec:
 						typeof manifest?.hooks === 'string' || Array.isArray(manifest?.hooks)
-							? manifest?.hooks
-							: undefined,
+							? Option.some(manifest.hooks)
+							: Option.none<string | ReadonlyArray<string>>(),
 					fallbackPath: 'hooks/hooks.json'
 				});
 		const inlineMcpSpec = inlineMcpSpecFromManifest(manifest);
@@ -643,8 +730,8 @@ export const scan = (
 					spec:
 						typeof manifest?.mcpServers === 'string' ||
 						Array.isArray(manifest?.mcpServers)
-							? manifest?.mcpServers
-							: undefined,
+							? Option.some(manifest.mcpServers)
+							: Option.none<string | ReadonlyArray<string>>(),
 					fallbackPath: '.mcp.json'
 				});
 		const pluginName = Option.match(sourceManifest, {
@@ -710,7 +797,9 @@ export const load = (
 				? Option.none<Schema.Schema.Type<typeof HooksSection>>()
 				: Option.some(
 						mergeHooksConfigs(
-							yield* Effect.forEach(scanned.hooksPaths, readHooksFile)
+							yield* Effect.forEach(scanned.hooksPaths, readHooksFile, {
+								concurrency: 1
+							})
 						)
 				  );
 		const mcpConfig = Option.isSome(scanned.inlineMcpConfig)
@@ -719,7 +808,9 @@ export const load = (
 				? Option.none<McpJsonFile>()
 				: Option.some(
 						mergeMcpConfigs(
-							yield* Effect.forEach(scanned.mcpPaths, readMcpFile)
+							yield* Effect.forEach(scanned.mcpPaths, readMcpFile, {
+								concurrency: 1
+							})
 						)
 				  );
 

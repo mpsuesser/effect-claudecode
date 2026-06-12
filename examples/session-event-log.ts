@@ -96,7 +96,7 @@ Hook.dispatch({
 			appendEvent(
 				input.session_id,
 				'SessionEnd',
-				`reason=${input.exit_reason}`
+				`reason=${input.reason}`
 			).pipe(
 				Effect.as(Hook.SessionEnd.passthrough()),
 				Effect.provide(NodeFileSystem.layer)

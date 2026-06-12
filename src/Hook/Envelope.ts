@@ -36,12 +36,27 @@ import * as Schema from 'effect/Schema';
  * @category Schemas
  * @since 0.1.0
  */
+export const EffortLevel = Schema.Literals([
+	'low',
+	'medium',
+	'high',
+	'xhigh',
+	'max'
+] as const);
+
+export class HookEffort extends Schema.Class<HookEffort>('HookEffort')({
+	level: EffortLevel
+}) {}
+
 export const envelopeFields = {
 	session_id: Schema.String,
 	transcript_path: Schema.String,
 	cwd: Schema.String,
 	hook_event_name: Schema.String,
-	permission_mode: Schema.optionalKey(Schema.String)
+	permission_mode: Schema.optionalKey(Schema.String),
+	effort: Schema.optionalKey(HookEffort),
+	agent_id: Schema.optionalKey(Schema.String),
+	agent_type: Schema.optionalKey(Schema.String)
 } as const;
 
 // ---------------------------------------------------------------------------

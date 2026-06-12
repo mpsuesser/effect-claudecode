@@ -19,7 +19,9 @@ import type { HookDefinition } from '../Runner.ts';
 export class Input extends Schema.Class<Input>('CwdChangedInput')(
 	{
 		...envelopeFields,
-		hook_event_name: Schema.Literal('CwdChanged')
+		hook_event_name: Schema.Literal('CwdChanged'),
+		old_cwd: Schema.String,
+		new_cwd: Schema.String
 	},
 	{ description: 'Input for the CwdChanged hook event.' }
 ) {}
@@ -28,11 +30,16 @@ export class Output extends Schema.Class<Output>('CwdChangedOutput')({
 	continue: Schema.optional(Schema.Boolean),
 	stopReason: Schema.optional(Schema.String),
 	suppressOutput: Schema.optional(Schema.Boolean),
-	systemMessage: Schema.optional(Schema.String)
+	systemMessage: Schema.optional(Schema.String),
+	terminalSequence: Schema.optional(Schema.String),
+	watchPaths: Schema.optional(Schema.Array(Schema.String))
 }) {}
 
 export const passthrough = (): Output =>
 	new Output({ continue: undefined });
+
+export const watchPaths = (paths: ReadonlyArray<string>): Output =>
+	new Output({ watchPaths: paths });
 
 export const define = (config: {
 	readonly handler: (

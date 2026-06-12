@@ -21,6 +21,7 @@ import * as Stdio from 'effect/Stdio';
 import * as Stream from 'effect/Stream';
 
 import {
+	HookControlledExit,
 	HookHandlerError,
 	HookInputDecodeError,
 	HookOutputEncodeError,
@@ -45,7 +46,10 @@ const defaultContext: HookContext.Interface = {
 	transcriptPath: '/tmp/transcript.jsonl',
 	cwd: '/tmp/workspace',
 	permissionMode: Option.some('default'),
-	hookEventName: 'TestEvent'
+	hookEventName: 'TestEvent',
+	effort: Option.none(),
+	agentId: Option.none(),
+	agentType: Option.none()
 };
 
 /**
@@ -170,7 +174,13 @@ const classifyFailure = (squashed: unknown): ErrorClassification => {
 	if (squashed instanceof HookStdoutWriteError) {
 		return { exitCode: 1, errorTag: 'HookStdoutWriteError' };
 	}
-	return { exitCode: 1, errorTag: undefined };
+	if (squashed instanceof HookControlledExit) {
+		return {
+			exitCode: squashed.code,
+			errorTag: 'HookControlledExit'
+		};
+	}
+	return { exitCode: 1, errorTag: undefined }; 
 };
 
 const classifyExit = <E, A>(
@@ -257,9 +267,9 @@ export const runHookWithMockStdin = <In extends HookEnvelope, Out>(
 		const trimmed = stdout.trim();
 		const output: unknown =
 			trimmed.length > 0
-				? Schema.decodeUnknownSync(Schema.UnknownFromJsonString)(
-						trimmed
-					)
+				? yield* Schema.decodeUnknownEffect(
+						Schema.UnknownFromJsonString
+					)(trimmed).pipe(Effect.orElseSucceed(() => undefined))
 				: undefined;
 
 		const { exitCode, errorTag } = classifyExit(exit);
@@ -323,7 +333,12 @@ export const fixtures = {
 	PostToolUse: makeFixture<Events.PostToolUse.Input>('PostToolUse', {
 		tool_name: 'Bash',
 		tool_input: { command: 'echo test' },
-		tool_response: { output: 'test\n', exit_code: 0 }
+		tool_response: {
+			stdout: 'test\n',
+			stderr: '',
+			interrupted: false,
+			isImage: false
+		}
 	}),
 	UserPromptSubmit: makeFixture<Events.UserPromptSubmit.Input>(
 		'UserPromptSubmit',
@@ -331,7 +346,7 @@ export const fixtures = {
 	),
 	Notification: makeFixture<Events.Notification.Input>('Notification', {
 		message: 'test notification',
-		notification_type: 'info'
+		notification_type: 'permission_prompt'
 	}),
 	Stop: makeFixture<Events.Stop.Input>('Stop', { stop_hook_active: false }),
 	SubagentStop: makeFixture<Events.SubagentStop.Input>('SubagentStop', {
@@ -344,8 +359,11 @@ export const fixtures = {
 	SessionStart: makeFixture<Events.SessionStart.Input>('SessionStart', {
 		source: 'startup'
 	}),
+	Setup: makeFixture<Events.Setup.Input>('Setup', {
+		trigger: 'init'
+	}),
 	SessionEnd: makeFixture<Events.SessionEnd.Input>('SessionEnd', {
-		exit_reason: 'clear'
+		reason: 'clear'
 	}),
 	PreCompact: makeFixture<Events.PreCompact.Input>('PreCompact', {
 		trigger: 'manual'
@@ -382,20 +400,23 @@ export const fixtures = {
 		'InstructionsLoaded',
 		{
 			file_path: '/repo/CLAUDE.md',
-			memory_type: 'project',
+			memory_type: 'Project',
 			load_reason: 'session_start'
 		}
 	),
 	StopFailure: makeFixture<Events.StopFailure.Input>('StopFailure', {
-		error_type: 'api_error'
+		error: 'rate_limit'
 	}),
-	CwdChanged: makeFixture<Events.CwdChanged.Input>('CwdChanged', {}),
+	CwdChanged: makeFixture<Events.CwdChanged.Input>('CwdChanged', {
+		old_cwd: '/tmp/workspace',
+		new_cwd: '/tmp/workspace/src'
+	}),
 	FileChanged: makeFixture<Events.FileChanged.Input>('FileChanged', {
 		file_path: '/repo/src/index.ts',
-		change_type: 'modified'
+		event: 'change'
 	}),
 	ConfigChange: makeFixture<Events.ConfigChange.Input>('ConfigChange', {
-		config_source: 'settings.json'
+		source: 'user_settings'
 	}),
 	SubagentStart: makeFixture<Events.SubagentStart.Input>('SubagentStart', {
 		agent_id: 'agent-1',
@@ -414,18 +435,39 @@ export const fixtures = {
 	TeammateIdle: makeFixture<Events.TeammateIdle.Input>('TeammateIdle', {}),
 	WorktreeCreate: makeFixture<Events.WorktreeCreate.Input>(
 		'WorktreeCreate',
-		{}
+		{ name: 'feature-auth' }
 	),
 	WorktreeRemove: makeFixture<Events.WorktreeRemove.Input>('WorktreeRemove', {
 		worktree_path: '/repo/.worktrees/feature'
 	}),
 	Elicitation: makeFixture<Events.Elicitation.Input>('Elicitation', {
-		mcp_server_name: 'test-server'
+		mcp_server_name: 'test-server',
+		message: 'Please provide credentials'
 	}),
 	ElicitationResult: makeFixture<Events.ElicitationResult.Input>(
 		'ElicitationResult',
-		{ mcp_server_name: 'test-server' }
-	)
+		{ mcp_server_name: 'test-server', action: 'accept' }
+	),
+	UserPromptExpansion: makeFixture<Events.UserPromptExpansion.Input>(
+		'UserPromptExpansion',
+		{
+			expansion_type: 'slash_command',
+			command_name: 'example-skill',
+			command_args: 'arg1 arg2',
+			command_source: 'plugin',
+			prompt: '/example-skill arg1 arg2'
+		}
+	),
+	PostToolBatch: makeFixture<Events.PostToolBatch.Input>('PostToolBatch', {
+		tool_calls: []
+	}),
+	MessageDisplay: makeFixture<Events.MessageDisplay.Input>('MessageDisplay', {
+		turn_id: 'turn-1',
+		message_id: 'message-1',
+		index: 0,
+		final: true,
+		delta: 'Hello\n'
+	})
 };
 
 // ---------------------------------------------------------------------------

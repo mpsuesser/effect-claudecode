@@ -22,10 +22,12 @@ import {
 	ApiKeyAuthorization,
 	BearerAuthorization,
 	HttpMcpServer,
+	McpOAuth,
 	McpServerConfig,
 	OAuth2Authorization,
 	SseMcpServer,
-	StdioMcpServer
+	StdioMcpServer,
+	WsMcpServer
 } from '../../src/Mcp/Schema.ts';
 import { McpJsonFile, loadJson } from '../../src/Mcp/JsonFile.ts';
 
@@ -66,11 +68,11 @@ describe('McpServerConfig — stdio', () => {
 	it.effect('decodes a minimal stdio server with just command', () =>
 		Effect.gen(function* () {
 			const server = yield* decodeServer({
-				type: 'stdio',
 				command: 'mcp-fs'
 			});
 			expect(server).toBeInstanceOf(StdioMcpServer);
-			expect(server).toMatchObject({ type: 'stdio', command: 'mcp-fs' });
+			expect(server).toMatchObject({ command: 'mcp-fs' });
+			expect(server.type).toBeUndefined();
 		})
 	);
 
@@ -100,25 +102,62 @@ describe('McpServerConfig — stdio', () => {
 });
 
 describe('McpServerConfig — http', () => {
-	it.effect('decodes an http server with url and headers', () =>
+	it.effect('decodes an http server with url, headers, helper, and alwaysLoad', () =>
 		Effect.gen(function* () {
 			const server = yield* decodeServer({
 				type: 'http',
 				url: 'https://api.example.com/mcp',
 				headers: { 'X-Custom': 'value' },
-				allowedEnvVars: ['API_KEY']
+				headersHelper: './headers.sh',
+				alwaysLoad: true
 			});
 			expect(server).toBeInstanceOf(HttpMcpServer);
 			expect(server).toMatchObject({
 				type: 'http',
 				url: 'https://api.example.com/mcp',
 				headers: { 'X-Custom': 'value' },
-				allowedEnvVars: ['API_KEY']
+				headersHelper: './headers.sh',
+				alwaysLoad: true
 			});
 		})
 	);
 
-	it.effect('decodes OAuth2, apiKey, and bearer authorization variants', () =>
+	it.effect('decodes streamable-http as an HTTP alias', () =>
+		Effect.gen(function* () {
+			const server = yield* decodeServer({
+				type: 'streamable-http',
+				url: 'https://api.example.com/mcp'
+			});
+			expect(server).toBeInstanceOf(HttpMcpServer);
+			expect(server).toMatchObject({
+				type: 'streamable-http',
+				url: 'https://api.example.com/mcp'
+			});
+		})
+	);
+
+	it.effect('decodes the current oauth object', () =>
+		Effect.gen(function* () {
+			const server = yield* decodeHttp({
+				type: 'http',
+				url: 'https://oauth.example.com/mcp',
+				oauth: {
+					clientId: 'client-123',
+					callbackPort: 3333,
+					authServerMetadataUrl: 'https://oauth.example.com/.well-known/oauth-authorization-server',
+					scopes: 'read write'
+				}
+			});
+			expect(server.oauth).toBeInstanceOf(McpOAuth);
+			expect(server.oauth).toMatchObject({
+				clientId: 'client-123',
+				callbackPort: 3333,
+				scopes: 'read write'
+			});
+		})
+	);
+
+	it.effect('decodes legacy OAuth2, apiKey, and bearer authorization variants', () =>
 		Effect.gen(function* () {
 			// Decode directly as HttpMcpServer so `authorization` is
 			// typed on the result without needing a cast.
@@ -158,8 +197,28 @@ describe('McpServerConfig — http', () => {
 	);
 });
 
+describe('McpServerConfig — ws', () => {
+	it.effect('decodes a ws server with url and headersHelper', () =>
+		Effect.gen(function* () {
+			const server = yield* decodeServer({
+				type: 'ws',
+				url: 'wss://events.example.com/socket',
+				headersHelper: './headers.sh',
+				alwaysLoad: true
+			});
+			expect(server).toBeInstanceOf(WsMcpServer);
+			expect(server).toMatchObject({
+				type: 'ws',
+				url: 'wss://events.example.com/socket',
+				headersHelper: './headers.sh',
+				alwaysLoad: true
+			});
+		})
+	);
+});
+
 describe('McpServerConfig — sse', () => {
-	it.effect('decodes an sse server with url', () =>
+	it.effect('decodes a deprecated sse server with url', () =>
 		Effect.gen(function* () {
 			const server = yield* decodeServer({
 				type: 'sse',
@@ -204,10 +263,14 @@ describe('McpJsonFile', () => {
 		Effect.gen(function* () {
 			const file = yield* decodeFile({
 				mcpServers: {
-					filesystem: { type: 'stdio', command: 'mcp-fs' },
+					filesystem: { command: 'mcp-fs' },
 					api: {
 						type: 'http',
 						url: 'https://api.example.com/mcp'
+					},
+					wsEvents: {
+						type: 'ws',
+						url: 'wss://events.example.com/socket'
 					},
 					events: {
 						type: 'sse',
@@ -219,10 +282,12 @@ describe('McpJsonFile', () => {
 			expect(Object.keys(file.mcpServers)).toEqual([
 				'filesystem',
 				'api',
+				'wsEvents',
 				'events'
 			]);
 			expect(file.mcpServers['filesystem']).toBeInstanceOf(StdioMcpServer);
 			expect(file.mcpServers['api']).toBeInstanceOf(HttpMcpServer);
+			expect(file.mcpServers['wsEvents']).toBeInstanceOf(WsMcpServer);
 			expect(file.mcpServers['events']).toBeInstanceOf(SseMcpServer);
 		})
 	);

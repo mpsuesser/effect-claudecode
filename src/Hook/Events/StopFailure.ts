@@ -4,7 +4,7 @@
  * Fires when a turn ends due to an API error (rate limit, auth, billing,
  * etc.) rather than a normal stop. Observability-only — the hook's
  * output and exit code are both ignored by Claude Code. Supports a
- * matcher on `error_type`.
+ * matcher on `error`.
  * See https://code.claude.com/docs/en/hooks#stopfailure.
  *
  * @since 0.1.0
@@ -19,9 +19,12 @@ import type { HookDefinition } from '../Runner.ts';
 
 export const ErrorType = Schema.Literals([
 	'rate_limit',
+	'overloaded',
 	'authentication_failed',
+	'oauth_org_not_allowed',
 	'billing_error',
 	'invalid_request',
+	'model_not_found',
 	'server_error',
 	'max_output_tokens',
 	'unknown'
@@ -31,8 +34,9 @@ export class Input extends Schema.Class<Input>('StopFailureInput')(
 	{
 		...envelopeFields,
 		hook_event_name: Schema.Literal('StopFailure'),
-		error_type: ErrorType,
-		error_message: Schema.optional(Schema.String)
+		error: ErrorType,
+		error_details: Schema.optional(Schema.String),
+		last_assistant_message: Schema.optional(Schema.String)
 	},
 	{ description: 'Input for the StopFailure hook event.' }
 ) {}
@@ -41,7 +45,8 @@ export class Output extends Schema.Class<Output>('StopFailureOutput')({
 	continue: Schema.optional(Schema.Boolean),
 	stopReason: Schema.optional(Schema.String),
 	suppressOutput: Schema.optional(Schema.Boolean),
-	systemMessage: Schema.optional(Schema.String)
+	systemMessage: Schema.optional(Schema.String),
+	terminalSequence: Schema.optional(Schema.String)
 }) {}
 
 export const passthrough = (): Output =>
@@ -59,7 +64,7 @@ export const define = (config: {
 });
 
 /**
- * Build a StopFailure hook that only handles matching `error_type` values.
+ * Build a StopFailure hook that only handles matching `error` values.
  *
  * @category Constructors
  * @since 0.1.0
@@ -76,7 +81,7 @@ export const onMatcher = (config: {
 	define({
 		handler: Matcher.handleMatcher({
 			matcher: config.matcher,
-			select: (input) => input.error_type,
+			select: (input) => input.error,
 			onMatch: config.handler,
 			onMismatch:
 				config.onMismatch ?? (() => Effect.succeed(passthrough()))

@@ -2,7 +2,7 @@
  * SessionEnd hook event.
  *
  * Fires when a session terminates (clear, resume, logout, exit). Supports
- * a matcher on `exit_reason`. Observability-only — the hook's output is
+ * a matcher on `reason`. Observability-only — the hook's output is
  * not acted on. See https://code.claude.com/docs/en/hooks#sessionend.
  *
  * @since 0.1.0
@@ -32,7 +32,7 @@ export class Input extends Schema.Class<Input>('SessionEndInput')(
 	{
 		...envelopeFields,
 		hook_event_name: Schema.Literal('SessionEnd'),
-		exit_reason: ExitReason
+		reason: ExitReason
 	},
 	{ description: 'Input for the SessionEnd hook event.' }
 ) {}
@@ -45,7 +45,8 @@ export class Output extends Schema.Class<Output>('SessionEndOutput')({
 	continue: Schema.optional(Schema.Boolean),
 	stopReason: Schema.optional(Schema.String),
 	suppressOutput: Schema.optional(Schema.Boolean),
-	systemMessage: Schema.optional(Schema.String)
+	systemMessage: Schema.optional(Schema.String),
+	terminalSequence: Schema.optional(Schema.String)
 }) {}
 
 // ---------------------------------------------------------------------------
@@ -71,7 +72,7 @@ export const define = (config: {
 });
 
 /**
- * Build a SessionEnd hook that only handles matching `exit_reason` values.
+ * Build a SessionEnd hook that only handles matching `reason` values.
  *
  * @category Constructors
  * @since 0.1.0
@@ -88,7 +89,7 @@ export const onMatcher = (config: {
 	define({
 		handler: Matcher.handleMatcher({
 			matcher: config.matcher,
-			select: (input) => input.exit_reason,
+			select: (input) => input.reason,
 			onMatch: config.handler,
 			onMismatch:
 				config.onMismatch ?? (() => Effect.succeed(passthrough()))

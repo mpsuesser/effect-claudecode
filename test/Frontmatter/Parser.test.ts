@@ -341,7 +341,7 @@ describe('Frontmatter.parse*File', () => {
 					new Map([
 						[
 							'/skills/bad/SKILL.md',
-							'---\ndescription: Missing name\n---\n\n# Broken\n'
+							'---\nname: bad\ndescription: Bad effort\neffort: ludicrous\n---\n\n# Broken\n'
 						]
 					])
 				)

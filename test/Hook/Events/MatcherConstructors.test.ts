@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from '@effect/vitest';
 import * as Effect from 'effect/Effect';
+import * as Schema from 'effect/Schema';
 
 import * as Elicitation from '../../../src/Hook/Events/Elicitation.ts';
 import * as FileChanged from '../../../src/Hook/Events/FileChanged.ts';
@@ -13,8 +14,10 @@ import * as PermissionRequest from '../../../src/Hook/Events/PermissionRequest.t
 import * as PreToolUse from '../../../src/Hook/Events/PreToolUse.ts';
 import * as Testing from '../../../src/Testing.ts';
 
+const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString);
+
 const notificationJson = (notificationType: string) =>
-	JSON.stringify({
+	encodeJson({
 		session_id: 'session-1',
 		transcript_path: '/tmp/t.jsonl',
 		cwd: '/tmp/ws',
@@ -24,17 +27,17 @@ const notificationJson = (notificationType: string) =>
 	});
 
 const fileChangedJson = (filePath: string) =>
-	JSON.stringify({
+	encodeJson({
 		session_id: 'session-1',
 		transcript_path: '/tmp/t.jsonl',
 		cwd: '/tmp/ws',
 		hook_event_name: 'FileChanged',
 		file_path: filePath,
-		change_type: 'modified'
+		event: 'change'
 	});
 
 const permissionRequestJson = (toolName: string) =>
-	JSON.stringify({
+	encodeJson({
 		session_id: 'session-1',
 		transcript_path: '/tmp/t.jsonl',
 		cwd: '/tmp/ws',
@@ -45,18 +48,18 @@ const permissionRequestJson = (toolName: string) =>
 	});
 
 const elicitationJson = (serverName: string) =>
-	JSON.stringify({
+	encodeJson({
 		session_id: 'session-1',
 		transcript_path: '/tmp/t.jsonl',
 		cwd: '/tmp/ws',
 		hook_event_name: 'Elicitation',
 		mcp_server_name: serverName,
-		tool_name: 'Read',
-		tool_input: { file_path: '/tmp/a.ts' }
+		message: 'Please authenticate',
+		mode: 'form'
 	});
 
 const preToolUseJson = (toolName: string) =>
-	JSON.stringify({
+	encodeJson({
 		session_id: 'session-1',
 		transcript_path: '/tmp/t.jsonl',
 		cwd: '/tmp/ws',
@@ -83,9 +86,7 @@ describe('matcher-aware constructors', () => {
 
 			expect(result.exitCode).toBe(0);
 			expect(result.output).toMatchObject({
-				hookSpecificOutput: {
-					additionalContext: 'matched notification'
-				}
+				systemMessage: 'matched notification'
 			});
 		})
 	);
@@ -147,7 +148,7 @@ describe('matcher-aware constructors', () => {
 		})
 	);
 
-	it.effect('PreToolUse.onMatcher defaults non-matching tools to allow()', () =>
+	it.effect('PreToolUse.onMatcher defaults non-matching tools to passthrough()', () =>
 		Effect.gen(function* () {
 			const hook = PreToolUse.onMatcher({
 				matcher: 'Bash|Read',
@@ -161,11 +162,7 @@ describe('matcher-aware constructors', () => {
 			);
 
 			expect(result.exitCode).toBe(0);
-			expect(result.output).toMatchObject({
-				hookSpecificOutput: {
-					permissionDecision: 'allow'
-				}
-			});
+			expect(result.output).toEqual({});
 		})
 	);
 });

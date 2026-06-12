@@ -21,10 +21,10 @@ const fileBasename = (path: string): string => {
 	return lastSlash < 0 ? path : path.slice(lastSlash + 1);
 };
 
-export const ChangeType = Schema.Literals([
-	'created',
-	'modified',
-	'deleted'
+export const FileChangedEvent = Schema.Literals([
+	'change',
+	'add',
+	'unlink'
 ] as const);
 
 export class Input extends Schema.Class<Input>('FileChangedInput')(
@@ -32,7 +32,7 @@ export class Input extends Schema.Class<Input>('FileChangedInput')(
 		...envelopeFields,
 		hook_event_name: Schema.Literal('FileChanged'),
 		file_path: Schema.String,
-		change_type: ChangeType
+		event: FileChangedEvent
 	},
 	{ description: 'Input for the FileChanged hook event.' }
 ) {}
@@ -41,11 +41,16 @@ export class Output extends Schema.Class<Output>('FileChangedOutput')({
 	continue: Schema.optional(Schema.Boolean),
 	stopReason: Schema.optional(Schema.String),
 	suppressOutput: Schema.optional(Schema.Boolean),
-	systemMessage: Schema.optional(Schema.String)
+	systemMessage: Schema.optional(Schema.String),
+	terminalSequence: Schema.optional(Schema.String),
+	watchPaths: Schema.optional(Schema.Array(Schema.String))
 }) {}
 
 export const passthrough = (): Output =>
 	new Output({ continue: undefined });
+
+export const watchPaths = (paths: ReadonlyArray<string>): Output =>
+	new Output({ watchPaths: paths });
 
 export const define = (config: {
 	readonly handler: (

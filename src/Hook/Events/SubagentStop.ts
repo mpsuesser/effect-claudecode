@@ -15,6 +15,7 @@ import type { HookContext } from '../Context.ts';
 import { envelopeFields } from '../Envelope.ts';
 import * as Matcher from '../Matcher.ts';
 import type { HookDefinition } from '../Runner.ts';
+import { BackgroundTask, SessionCron } from './Stop.ts';
 
 // ---------------------------------------------------------------------------
 // Input
@@ -28,7 +29,9 @@ export class Input extends Schema.Class<Input>('SubagentStopInput')(
 		agent_id: Schema.String,
 		agent_type: Schema.String,
 		agent_transcript_path: Schema.String,
-		last_assistant_message: Schema.String
+		last_assistant_message: Schema.String,
+		background_tasks: Schema.optional(Schema.Array(BackgroundTask)),
+		session_crons: Schema.optional(Schema.Array(SessionCron))
 	},
 	{ description: 'Input for the SubagentStop hook event.' }
 ) {}
@@ -37,13 +40,22 @@ export class Input extends Schema.Class<Input>('SubagentStopInput')(
 // Output
 // ---------------------------------------------------------------------------
 
+export class HookSpecificOutput extends Schema.Class<HookSpecificOutput>(
+	'SubagentStopHookSpecificOutput'
+)({
+	hookEventName: Schema.Literal('SubagentStop'),
+	additionalContext: Schema.optional(Schema.String)
+}) {}
+
 export class Output extends Schema.Class<Output>('SubagentStopOutput')({
 	decision: Schema.optional(Schema.Literal('block')),
 	reason: Schema.optional(Schema.String),
 	continue: Schema.optional(Schema.Boolean),
 	stopReason: Schema.optional(Schema.String),
 	suppressOutput: Schema.optional(Schema.Boolean),
-	systemMessage: Schema.optional(Schema.String)
+	systemMessage: Schema.optional(Schema.String),
+	terminalSequence: Schema.optional(Schema.String),
+	hookSpecificOutput: Schema.optional(HookSpecificOutput)
 }) {}
 
 // ---------------------------------------------------------------------------
@@ -55,6 +67,14 @@ export const allowStop = (): Output =>
 
 export const block = (reason: string): Output =>
 	new Output({ decision: 'block', reason });
+
+export const addContext = (additionalContext: string): Output =>
+	new Output({
+		hookSpecificOutput: new HookSpecificOutput({
+			hookEventName: 'SubagentStop',
+			additionalContext
+		})
+	});
 
 // ---------------------------------------------------------------------------
 // define

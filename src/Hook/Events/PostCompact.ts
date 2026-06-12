@@ -22,7 +22,8 @@ export class Input extends Schema.Class<Input>('PostCompactInput')(
 	{
 		...envelopeFields,
 		hook_event_name: Schema.Literal('PostCompact'),
-		trigger: Trigger
+		trigger: Trigger,
+		compact_summary: Schema.optional(Schema.String)
 	},
 	{ description: 'Input for the PostCompact hook event.' }
 ) {}
@@ -31,7 +32,8 @@ export class Output extends Schema.Class<Output>('PostCompactOutput')({
 	continue: Schema.optional(Schema.Boolean),
 	stopReason: Schema.optional(Schema.String),
 	suppressOutput: Schema.optional(Schema.Boolean),
-	systemMessage: Schema.optional(Schema.String)
+	systemMessage: Schema.optional(Schema.String),
+	terminalSequence: Schema.optional(Schema.String)
 }) {}
 
 export const passthrough = (): Output =>

@@ -34,10 +34,17 @@ export class WorkingDirectoriesConfig extends Schema.Class<WorkingDirectoriesCon
 export class PermissionsConfig extends Schema.Class<PermissionsConfig>(
 	'PermissionsConfig'
 )({
-	mode: Schema.optional(PermissionMode),
+	defaultMode: Schema.optional(PermissionMode),
 	allow: Schema.optional(Schema.Array(Schema.String)),
 	ask: Schema.optional(Schema.Array(Schema.String)),
 	deny: Schema.optional(Schema.Array(Schema.String)),
+	additionalDirectories: Schema.optional(Schema.Array(Schema.String)),
+	disableBypassPermissionsMode: Schema.optional(Schema.Literal('disable')),
+	skipDangerousModePermissionPrompt: Schema.optional(Schema.Boolean),
+
+	/** @deprecated Use `defaultMode`. */
+	mode: Schema.optional(PermissionMode),
+	/** @deprecated Use `additionalDirectories`. */
 	workingDirectories: Schema.optional(WorkingDirectoriesConfig)
 }) {}
 
@@ -50,7 +57,8 @@ export class StatusLineConfig extends Schema.Class<StatusLineConfig>(
 )({
 	type: Schema.Literals(['command', 'disabled'] as const),
 	command: Schema.optional(Schema.String),
-	padding: Schema.optional(Schema.Number)
+	padding: Schema.optional(Schema.Number),
+	refreshInterval: Schema.optional(Schema.Number)
 }) {}
 
 // ---------------------------------------------------------------------------
@@ -89,36 +97,94 @@ export class GithubSourceSpec extends Schema.Class<GithubSourceSpec>(
 )({
 	source: Schema.Literal('github'),
 	repo: Schema.String,
-	ref: Schema.optional(Schema.String)
+	ref: Schema.optional(Schema.String),
+	path: Schema.optional(Schema.String),
+	sha: Schema.optional(Schema.String),
+	skipLfs: Schema.optional(Schema.Boolean)
 }) {}
+
+export class GitSourceSpec extends Schema.Class<GitSourceSpec>('GitSourceSpec')({
+	source: Schema.Literal('git'),
+	url: Schema.String,
+	ref: Schema.optional(Schema.String),
+	path: Schema.optional(Schema.String),
+	sha: Schema.optional(Schema.String),
+	skipLfs: Schema.optional(Schema.Boolean)
+}) {}
+
+export class HostPatternSourceSpec extends Schema.Class<HostPatternSourceSpec>(
+	'HostPatternSourceSpec'
+)({
+	source: Schema.Literal('hostPattern'),
+	pattern: Schema.String
+}) {}
+
+export class SettingsSourceSpec extends Schema.Class<SettingsSourceSpec>(
+	'SettingsSourceSpec'
+)({
+	source: Schema.Literal('settings'),
+	name: Schema.optional(Schema.String),
+	plugins: Schema.optional(Schema.Array(Schema.Record(Schema.String, Schema.Unknown)))
+}) {}
+
+export const MarketplaceSourceSpec = Schema.Union([
+	DirectorySourceSpec,
+	GithubSourceSpec,
+	GitSourceSpec,
+	HostPatternSourceSpec,
+	SettingsSourceSpec
+]).annotate({ identifier: 'MarketplaceSourceSpec' });
 
 export class DirectoryMarketplace extends Schema.Class<DirectoryMarketplace>(
 	'DirectoryMarketplace'
 )({
-	source: DirectorySourceSpec
+	source: DirectorySourceSpec,
+	autoUpdate: Schema.optional(Schema.Boolean)
 }) {}
 
 export class GithubMarketplace extends Schema.Class<GithubMarketplace>(
 	'GithubMarketplace'
 )({
-	source: GithubSourceSpec
+	source: GithubSourceSpec,
+	autoUpdate: Schema.optional(Schema.Boolean)
+}) {}
+
+export class GenericMarketplace extends Schema.Class<GenericMarketplace>(
+	'GenericMarketplace'
+)({
+	source: MarketplaceSourceSpec,
+	autoUpdate: Schema.optional(Schema.Boolean)
 }) {}
 
 export const Marketplace = Schema.Union([
 	DirectoryMarketplace,
-	GithubMarketplace
+	GithubMarketplace,
+	GenericMarketplace
 ]).annotate({ identifier: 'Marketplace' });
 
 // ---------------------------------------------------------------------------
-// API key helper
+// API key helper / attribution
 // ---------------------------------------------------------------------------
 
+/** @deprecated `apiKeyHelper` is a string script path in current Claude Code. */
 export class ApiKeyHelperConfig extends Schema.Class<ApiKeyHelperConfig>(
 	'ApiKeyHelperConfig'
 )({
 	executable: Schema.optional(Schema.String),
 	timeout: Schema.optional(Schema.Number)
 }) {}
+
+export class AttributionConfig extends Schema.Class<AttributionConfig>(
+	'AttributionConfig'
+)({
+	commit: Schema.optional(Schema.String),
+	pr: Schema.optional(Schema.String)
+}) {}
+
+export const ApiKeyHelper = Schema.Union([
+	Schema.String,
+	ApiKeyHelperConfig
+]).annotate({ identifier: 'ApiKeyHelper' });
 
 // ---------------------------------------------------------------------------
 // Top-level settings
@@ -140,10 +206,15 @@ export class SettingsFile extends Schema.Class<SettingsFile>('SettingsFile')({
 	permissions: Schema.optional(PermissionsConfig),
 
 	model: Schema.optional(Schema.String),
+	effortLevel: Schema.optional(
+		Schema.Literals(['low', 'medium', 'high', 'xhigh'] as const)
+	),
+	/** @deprecated Use `effortLevel`. */
 	effort: Schema.optional(
 		Schema.Literals(['low', 'medium', 'high', 'max'] as const)
 	),
 	fastMode: Schema.optional(Schema.Boolean),
+	fastModePerSessionOptIn: Schema.optional(Schema.Boolean),
 
 	outputStyle: Schema.optional(Schema.String),
 	theme: Schema.optional(Schema.String),
@@ -164,10 +235,14 @@ export class SettingsFile extends Schema.Class<SettingsFile>('SettingsFile')({
 		Schema.Record(Schema.String, Marketplace)
 	),
 
+	attribution: Schema.optional(AttributionConfig),
+	/** @deprecated Use `attribution`. */
 	includeCoAuthoredBy: Schema.optional(Schema.Boolean),
 	cleanupPeriodDays: Schema.optional(Schema.Number),
 
-	apiKeyHelper: Schema.optional(ApiKeyHelperConfig),
+	apiKeyHelper: Schema.optional(ApiKeyHelper),
+	allowedHttpHookUrls: Schema.optional(Schema.Array(Schema.String)),
+	httpHookAllowedEnvVars: Schema.optional(Schema.Array(Schema.String)),
 
 	agent: Schema.optional(Schema.String)
 }) {}

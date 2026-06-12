@@ -21,6 +21,7 @@ import * as NodeStdio from '@effect/platform-node-shared/NodeStdio';
 import { runMain as platformRunMain } from '@effect/platform-node-shared/NodeRuntime';
 
 import {
+	HookControlledExit,
 	HookHandlerError,
 	HookInputDecodeError,
 	HookOutputEncodeError,
@@ -44,13 +45,43 @@ import { HookEnvelope } from './Envelope.ts';
  * @category Models
  * @since 0.1.0
  */
+export class HookProcessOutput extends Schema.TaggedClass<HookProcessOutput>()(
+	'HookProcessOutput',
+	{
+		stdout: Schema.optional(Schema.String),
+		stderr: Schema.optional(Schema.String),
+		exitCode: Schema.Number
+	}
+) {}
+
+export const processOutput = (options: {
+	readonly exitCode?: number;
+	readonly stdout?: string;
+	readonly stderr?: string;
+}): HookProcessOutput =>
+	new HookProcessOutput({
+		exitCode: options.exitCode ?? 0,
+		...(options.stdout !== undefined ? { stdout: options.stdout } : {}),
+		...(options.stderr !== undefined ? { stderr: options.stderr } : {})
+	});
+
+export const stderrExit = (
+	stderr: string,
+	exitCode = 2
+): HookProcessOutput => processOutput({ stderr, exitCode });
+
+export const rawStdout = (stdout: string): HookProcessOutput =>
+	processOutput({ stdout });
+
+const isHookProcessOutput = Schema.is(HookProcessOutput);
+
 export interface HookDefinition<In extends HookEnvelope, Out> {
 	readonly event: string;
 	readonly inputSchema: Schema.Codec<In, unknown>;
 	readonly outputSchema: Schema.Codec<Out, unknown>;
 	readonly handler: (
 		input: In
-	) => Effect.Effect<Out, unknown, HookContext.Service>;
+	) => Effect.Effect<Out | HookProcessOutput, unknown, HookContext.Service>;
 }
 
 /**
@@ -80,7 +111,8 @@ type RunnerError =
 	| HookInputDecodeError
 	| HookHandlerError
 	| HookOutputEncodeError
-	| HookStdoutWriteError;
+	| HookStdoutWriteError
+	| HookControlledExit;
 
 // ---------------------------------------------------------------------------
 // Internal: stdin/stdout
@@ -125,6 +157,32 @@ const writeStdout = (
 		);
 	}).pipe(Effect.withLogSpan('Hook.writeStdout'));
 
+const writeRawStdout = (
+	text: string
+): Effect.Effect<void, HookStdoutWriteError, Stdio.Stdio> =>
+	Effect.gen(function* () {
+		yield* Effect.logDebug('writing raw hook stdout').pipe(
+			Effect.annotateLogs({ byteLength: text.length })
+		);
+		const stdio = yield* Stdio.Stdio;
+		yield* Stream.run(Stream.make(text), stdio.stdout()).pipe(
+			Effect.mapError((cause) => new HookStdoutWriteError({ cause }))
+		);
+	}).pipe(Effect.withLogSpan('Hook.writeRawStdout'));
+
+const writeStderr = (
+	text: string
+): Effect.Effect<void, HookStdoutWriteError, Stdio.Stdio> =>
+	Effect.gen(function* () {
+		yield* Effect.logDebug('writing hook stderr').pipe(
+			Effect.annotateLogs({ byteLength: text.length })
+		);
+		const stdio = yield* Stdio.Stdio;
+		yield* Stream.run(Stream.make(text), stdio.stderr()).pipe(
+			Effect.mapError((cause) => new HookStdoutWriteError({ cause }))
+		);
+	}).pipe(Effect.withLogSpan('Hook.writeStderr'));
+
 // ---------------------------------------------------------------------------
 // Per-hook execution
 // ---------------------------------------------------------------------------
@@ -167,12 +225,29 @@ const runHookFromParsed = <In extends HookEnvelope, Out>(
 			hook_event_name: input.hook_event_name,
 			...(input.permission_mode !== undefined && {
 				permission_mode: input.permission_mode
-			})
+			}),
+			...(input.effort !== undefined && { effort: input.effort }),
+			...(input.agent_id !== undefined && { agent_id: input.agent_id }),
+			...(input.agent_type !== undefined && { agent_type: input.agent_type })
 		});
 		const output = yield* hook.handler(input).pipe(
 			Effect.provide(HookContext.layer(envelope)),
 			Effect.mapError((cause) => new HookHandlerError({ cause }))
 		);
+		if (isHookProcessOutput(output)) {
+			if (output.stdout !== undefined) {
+				yield* writeRawStdout(output.stdout);
+			}
+			if (output.stderr !== undefined) {
+				yield* writeStderr(output.stderr);
+			}
+			if (output.exitCode !== 0) {
+				return yield* Effect.fail(
+					new HookControlledExit({ code: output.exitCode })
+				);
+			}
+			return;
+		}
 		yield* Effect.logDebug('encoding hook output').pipe(
 			Effect.annotateLogs({ hookEventName: input.hook_event_name })
 		);
@@ -287,6 +362,7 @@ export const hookTeardown: Runtime.Teardown = <E, A>(
 	if (Exit.isSuccess(exit)) return onExit(0);
 	if (Cause.hasInterruptsOnly(exit.cause)) return onExit(130);
 	const squashed = Cause.squash(exit.cause);
+	if (squashed instanceof HookControlledExit) return onExit(squashed.code);
 	if (squashed instanceof HookInputDecodeError) return onExit(2);
 	return onExit(1);
 };

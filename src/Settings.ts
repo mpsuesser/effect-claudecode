@@ -10,15 +10,22 @@
 // ---------------------------------------------------------------------------
 
 export {
+	ApiKeyHelper,
 	ApiKeyHelperConfig,
+	AttributionConfig,
 	DirectoryMarketplace,
 	DirectorySourceSpec,
+	GenericMarketplace,
+	GitSourceSpec,
 	GithubMarketplace,
 	GithubSourceSpec,
+	HostPatternSourceSpec,
 	Marketplace,
+	MarketplaceSourceSpec,
 	McpServerEntry,
 	PermissionMode,
 	PermissionsConfig,
+	SettingsSourceSpec,
 	SettingsFile,
 	StatusLineConfig,
 	WorkingDirectoriesConfig
@@ -35,6 +42,7 @@ export {
 	HookMatcherGroup,
 	HooksSection,
 	HttpHookEntry,
+	McpToolHookEntry,
 	PromptHookEntry
 } from './Settings/HooksSection.ts';
 

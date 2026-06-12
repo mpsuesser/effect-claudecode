@@ -2,15 +2,15 @@
  * Schema for the YAML frontmatter of a `SKILL.md` file.
  *
  * Claude Code skills are markdown files whose frontmatter declares
- * metadata that governs discovery, invocation, and tool access. Only
- * `name` and `description` are required; every other field tunes
- * behavior.
+ * metadata that governs discovery, invocation, and tool access. All
+ * frontmatter fields are optional in Claude Code; `name` falls back to
+ * the directory name and `description` can fall back to the body.
  *
  * Note: Claude Code uses kebab-cased keys in some frontmatter fields
  * (`disable-model-invocation`, `user-invocable`, `allowed-tools`,
- * `argument-hint`). `Schema.Class` preserves the exact key, so the
- * TypeScript properties use the same kebab-case identifier via
- * bracket access.
+ * `disallowed-tools`, `argument-hint`). `Schema.Class` preserves the
+ * exact key, so the TypeScript properties use the same kebab-case
+ * identifier via bracket access.
  *
  * @since 0.1.0
  */
@@ -19,14 +19,21 @@ import * as Schema from 'effect/Schema';
 import { HooksSection } from '../Settings/HooksSection.ts';
 
 // ---------------------------------------------------------------------------
-// Helper — `allowed-tools` accepts either a comma-separated string or
-// an array of strings.
+// Helpers
 // ---------------------------------------------------------------------------
 
-const StringOrStringArray = Schema.Union([
+export const StringOrStringArray = Schema.Union([
 	Schema.String,
 	Schema.Array(Schema.String)
-]);
+]).annotate({ identifier: 'StringOrStringArray' });
+
+export const EffortLevel = Schema.Literals([
+	'low',
+	'medium',
+	'high',
+	'xhigh',
+	'max'
+] as const);
 
 // ---------------------------------------------------------------------------
 // SkillFrontmatter
@@ -41,9 +48,13 @@ const StringOrStringArray = Schema.Union([
 export class SkillFrontmatter extends Schema.Class<SkillFrontmatter>(
 	'SkillFrontmatter'
 )({
-	// Required
-	name: Schema.String,
-	description: Schema.String,
+	// Metadata
+	name: Schema.optional(Schema.String),
+	description: Schema.optional(Schema.String),
+	when_to_use: Schema.optional(Schema.String),
+	license: Schema.optional(Schema.String),
+	metadata: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+	compatibility: Schema.optional(Schema.String),
 
 	// Discovery / invocation toggles
 	'disable-model-invocation': Schema.optional(Schema.Boolean),
@@ -55,16 +66,16 @@ export class SkillFrontmatter extends Schema.Class<SkillFrontmatter>(
 
 	// Model / effort hints
 	model: Schema.optional(Schema.String),
-	effort: Schema.optional(
-		Schema.Literals(['low', 'medium', 'high', 'max'] as const)
-	),
+	effort: Schema.optional(EffortLevel),
 
-	// Tooling
+	// Arguments / tooling
+	arguments: Schema.optional(StringOrStringArray),
 	'allowed-tools': Schema.optional(StringOrStringArray),
+	'disallowed-tools': Schema.optional(StringOrStringArray),
 	'argument-hint': Schema.optional(Schema.String),
 
 	// Supporting files
-	paths: Schema.optional(Schema.Array(Schema.String)),
+	paths: Schema.optional(StringOrStringArray),
 
 	// Shell config (rarely used; declares the shell binary to run
 	// any command invocations from this skill under)
@@ -76,6 +87,4 @@ export class SkillFrontmatter extends Schema.Class<SkillFrontmatter>(
 	hooks: Schema.optional(HooksSection)
 }) {}
 
-export type SkillFrontmatterInput = ConstructorParameters<
-	typeof SkillFrontmatter
->[0];
+export type SkillFrontmatterInput = typeof SkillFrontmatter.Type;

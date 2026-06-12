@@ -232,13 +232,15 @@ describe('Settings.load — merging', () => {
 		));
 
 	it.effect(
-		'merge is shallow — nested permissions are replaced, not deep-merged',
+		'merges nested permissions by concatenating arrays and overriding scalar mode',
 		() =>
 			Effect.gen(function* () {
 				const settings = yield* Loader.load(CWD);
-				expect(settings.permissions).toEqual({
-					mode: 'acceptEdits',
-					allow: ['Write(**)']
+				expect(settings.permissions).toMatchObject({
+					defaultMode: 'acceptEdits',
+					allow: ['Write(**)'],
+					deny: ['Bash(rm -rf /)'],
+					additionalDirectories: ['/user-extra', '/project-extra']
 				});
 			}).pipe(
 				Effect.provide(
@@ -246,21 +248,11 @@ describe('Settings.load — merging', () => {
 						fsWith([
 							[
 								USER_PATH,
-								JSON.stringify({
-									permissions: {
-										mode: 'default',
-										deny: ['Bash(rm -rf /)']
-									}
-								})
+								'{"permissions":{"defaultMode":"default","deny":["Bash(rm -rf /)"],"additionalDirectories":["/user-extra"]}}'
 							],
 							[
 								PROJECT_PATH,
-								JSON.stringify({
-									permissions: {
-										mode: 'acceptEdits',
-										allow: ['Write(**)']
-									}
-								})
+								'{"permissions":{"defaultMode":"acceptEdits","allow":["Write(**)"],"additionalDirectories":["/project-extra"]}}'
 							]
 						])
 					)

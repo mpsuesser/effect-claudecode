@@ -3,10 +3,12 @@
  *
  * @since 0.1.0
  */
+import * as Arr from 'effect/Array';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import * as FileSystem from 'effect/FileSystem';
 import * as Option from 'effect/Option';
+import * as Order from 'effect/Order';
 import * as Path from 'effect/Path';
 import * as Schema from 'effect/Schema';
 
@@ -108,30 +110,41 @@ const issue = (options: {
 
 const splitIssues = (issues: ReadonlyArray<PluginIssue>): PluginLintReport => ({
 	issues,
-	errors: issues.filter((item) => item.severity === 'error'),
-	warnings: issues.filter((item) => item.severity === 'warning')
+	errors: Arr.filter(issues, (item) => item.severity === 'error'),
+	warnings: Arr.filter(issues, (item) => item.severity === 'warning')
 });
 
-const duplicateValues = (values: ReadonlyArray<string>): ReadonlyArray<string> => {
-	const counts = new Map<string, number>();
-	for (const value of values) {
-		counts.set(value, (counts.get(value) ?? 0) + 1);
-	}
-	return Array.from(counts.entries())
-		.filter(([, count]) => count > 1)
-		.map(([value]) => value)
-		.sort();
-};
+const duplicateValues = (values: ReadonlyArray<string>): ReadonlyArray<string> =>
+	Arr.sort(
+		Arr.filter(
+			Arr.dedupe(values),
+			(value) => Arr.filter(values, (candidate) => candidate === value).length > 1
+		),
+		Order.String
+	);
+
+const entryPathOption = (entry: { readonly path?: string }): Option.Option<string> =>
+	Option.fromNullishOr(entry.path);
+
+const entryPaths = (
+	entries: ReadonlyArray<{ readonly path?: string }>
+): ReadonlyArray<string> =>
+	Arr.flatMap(entries, (entry) =>
+		Option.match(entryPathOption(entry), {
+			onNone: (): ReadonlyArray<string> => [],
+			onSome: (entryPath) => [entryPath]
+		})
+	);
 
 const matchesFlatSpec = (
 	entryPath: string,
-	spec: string | ReadonlyArray<string> | undefined
+	spec: Option.Option<string | ReadonlyArray<string>>
 ): boolean => {
 	const specs = pathSpecs(spec);
 	if (specs.length === 0) {
 		return true;
 	}
-	return specs.some((candidate) =>
+	return Arr.some(specs, (candidate) =>
 		isMarkdownFilePath(candidate)
 			? entryPath === candidate
 			: entryPath.startsWith(`${candidate}/`)
@@ -140,13 +153,13 @@ const matchesFlatSpec = (
 
 const matchesSkillSpec = (
 	entryPath: string,
-	spec: string | ReadonlyArray<string> | undefined
+	spec: Option.Option<string | ReadonlyArray<string>>
 ): boolean => {
 	const specs = pathSpecs(spec);
 	if (specs.length === 0) {
 		return true;
 	}
-	return specs.some((candidate) =>
+	return Arr.some(specs, (candidate) =>
 		isSkillFilePath(candidate)
 			? entryPath === candidate
 			: entryPath.startsWith(`${candidate}/`)
@@ -181,137 +194,174 @@ const inlineMcpFromManifest = (
 
 const validateFlatEntries = (options: {
 	readonly kind: 'command' | 'agent' | 'outputStyle';
-	readonly manifestField: string | ReadonlyArray<string> | undefined;
+	readonly manifestField: Option.Option<string | ReadonlyArray<string>>;
 	readonly entries: ReadonlyArray<FlatEntry>;
 }): ReadonlyArray<PluginIssue> => {
-	const issues: Array<PluginIssue> = [];
 	const pluralKind = `${options.kind}s`;
+	const declaredPaths = pathSpecs(options.manifestField);
 
-	for (const duplicate of duplicateValues(options.entries.map((entry) => entry.name))) {
-		issues.push(
+	const duplicateNameIssues = Arr.map(
+		duplicateValues(Arr.map(options.entries, (entry) => entry.name)),
+		(duplicate) =>
 			issue({
 				code: `duplicate-${options.kind}-name`,
 				severity: 'error',
 				message: `Duplicate ${options.kind} name \`${duplicate}\`.`
 			})
-		);
-	}
+	);
 
-	for (const duplicate of duplicateValues(
-		options.entries.flatMap((entry) => (entry.path !== undefined ? [entry.path] : []))
-	)) {
-		issues.push(
+	const duplicatePathIssues = Arr.map(
+		duplicateValues(entryPaths(options.entries)),
+		(duplicate) =>
 			issue({
 				code: `duplicate-${options.kind}-path`,
 				severity: 'error',
 				message: `Duplicate ${options.kind} path \`${duplicate}\`.`,
 				path: duplicate
 			})
-		);
-	}
+	);
 
-	const declaredPaths = pathSpecs(options.manifestField);
-	if (declaredPaths.length > 1) {
-		for (const entry of options.entries.filter((candidate) => candidate.path === undefined)) {
-			issues.push(
-				issue({
-					code: `${pluralKind}-layout-ambiguous`,
-					severity: 'error',
-					message: `${pluralKind} declares multiple target paths, so ${options.kind} \`${entry.name}\` needs an explicit entry.path.`
-				})
-			);
-		}
-	}
+	const ambiguousLayoutIssues =
+		declaredPaths.length > 1
+			? Arr.map(
+					Arr.filter(options.entries, (candidate) =>
+						Option.isNone(entryPathOption(candidate))
+					),
+					(entry) =>
+						issue({
+							code: `${pluralKind}-layout-ambiguous`,
+							severity: 'error',
+							message: `${pluralKind} declares multiple target paths, so ${options.kind} \`${entry.name}\` needs an explicit entry.path.`
+						})
+				)
+			: [];
 
-	for (const entry of options.entries) {
-		if (entry.path !== undefined && !entry.path.endsWith('.md')) {
-			issues.push(
-				issue({
-					code: `${pluralKind}-path-invalid`,
-					severity: 'error',
-					message: `${options.kind} \`${entry.name}\` path must point to a markdown file.`,
-					path: entry.path
-				})
-			);
-		}
-		if (entry.path !== undefined && !matchesFlatSpec(entry.path, options.manifestField)) {
-			issues.push(
-				issue({
-					code: `${pluralKind}-path-outside-layout`,
-					severity: 'error',
-					message: `${options.kind} \`${entry.name}\` path falls outside the manifest-declared ${pluralKind} layout.`,
-					path: entry.path
-				})
-			);
-		}
-	}
+	const invalidPathIssues = Arr.flatMap(options.entries, (entry) =>
+		Option.match(entryPathOption(entry), {
+			onNone: (): ReadonlyArray<PluginIssue> => [],
+			onSome: (entryPath) =>
+				entryPath.endsWith('.md')
+					? []
+					: [
+							issue({
+								code: `${pluralKind}-path-invalid`,
+								severity: 'error',
+								message: `${options.kind} \`${entry.name}\` path must point to a markdown file.`,
+								path: entryPath
+							})
+						]
+		})
+	);
 
-	return issues;
+	const outsideLayoutIssues = Arr.flatMap(options.entries, (entry) =>
+		Option.match(entryPathOption(entry), {
+			onNone: (): ReadonlyArray<PluginIssue> => [],
+			onSome: (entryPath) =>
+				matchesFlatSpec(entryPath, options.manifestField)
+					? []
+					: [
+							issue({
+								code: `${pluralKind}-path-outside-layout`,
+								severity: 'error',
+								message: `${options.kind} \`${entry.name}\` path falls outside the manifest-declared ${pluralKind} layout.`,
+								path: entryPath
+							})
+						]
+		})
+	);
+
+	return [
+		...duplicateNameIssues,
+		...duplicatePathIssues,
+		...ambiguousLayoutIssues,
+		...invalidPathIssues,
+		...outsideLayoutIssues
+	];
 };
 
-const validateSkillEntries = (definition: PluginDefinition | LoadedPlugin): ReadonlyArray<PluginIssue> => {
-	const issues: Array<PluginIssue> = [];
+const validateSkillEntries = (
+	definition: PluginDefinition | LoadedPlugin
+): ReadonlyArray<PluginIssue> => {
+	const manifestSkills = Option.fromNullishOr(definition.manifest.skills);
+	const declaredPaths = pathSpecs(manifestSkills);
 
-	for (const duplicate of duplicateValues(definition.skills.map((entry) => entry.name))) {
-		issues.push(
+	const duplicateNameIssues = Arr.map(
+		duplicateValues(Arr.map(definition.skills, (entry) => entry.name)),
+		(duplicate) =>
 			issue({
 				code: 'duplicate-skill-name',
 				severity: 'error',
 				message: `Duplicate skill name \`${duplicate}\`.`
 			})
-		);
-	}
+	);
 
-	for (const duplicate of duplicateValues(
-		definition.skills.flatMap((entry) => (entry.path !== undefined ? [entry.path] : []))
-	)) {
-		issues.push(
+	const duplicatePathIssues = Arr.map(
+		duplicateValues(entryPaths(definition.skills)),
+		(duplicate) =>
 			issue({
 				code: 'duplicate-skill-path',
 				severity: 'error',
 				message: `Duplicate skill path \`${duplicate}\`.`,
 				path: duplicate
 			})
-		);
-	}
+	);
 
-	const declaredPaths = pathSpecs(definition.manifest.skills);
-	if (declaredPaths.length > 1) {
-		for (const entry of definition.skills.filter((candidate) => candidate.path === undefined)) {
-			issues.push(
-				issue({
-					code: 'skills-layout-ambiguous',
-					severity: 'error',
-					message: `skills declares multiple target paths, so skill \`${entry.name}\` needs an explicit entry.path.`
-				})
-			);
-		}
-	}
+	const ambiguousLayoutIssues =
+		declaredPaths.length > 1
+			? Arr.map(
+					Arr.filter(definition.skills, (candidate) =>
+						Option.isNone(entryPathOption(candidate))
+					),
+					(entry) =>
+						issue({
+							code: 'skills-layout-ambiguous',
+							severity: 'error',
+							message: `skills declares multiple target paths, so skill \`${entry.name}\` needs an explicit entry.path.`
+						})
+				)
+			: [];
 
-	for (const entry of definition.skills) {
-		if (entry.path !== undefined && !isSkillFilePath(entry.path)) {
-			issues.push(
-				issue({
-					code: 'skills-path-invalid',
-					severity: 'error',
-					message: `Skill \`${entry.name}\` path must point to a SKILL.md file.`,
-					path: entry.path
-				})
-			);
-		}
-		if (entry.path !== undefined && !matchesSkillSpec(entry.path, definition.manifest.skills)) {
-			issues.push(
-				issue({
-					code: 'skills-path-outside-layout',
-					severity: 'error',
-					message: `Skill \`${entry.name}\` path falls outside the manifest-declared skills layout.`,
-					path: entry.path
-				})
-			);
-		}
-	}
+	const invalidPathIssues = Arr.flatMap(definition.skills, (entry) =>
+		Option.match(entryPathOption(entry), {
+			onNone: (): ReadonlyArray<PluginIssue> => [],
+			onSome: (entryPath) =>
+				isSkillFilePath(entryPath)
+					? []
+					: [
+							issue({
+								code: 'skills-path-invalid',
+								severity: 'error',
+								message: `Skill \`${entry.name}\` path must point to a SKILL.md file.`,
+								path: entryPath
+							})
+						]
+		})
+	);
 
-	return issues;
+	const outsideLayoutIssues = Arr.flatMap(definition.skills, (entry) =>
+		Option.match(entryPathOption(entry), {
+			onNone: (): ReadonlyArray<PluginIssue> => [],
+			onSome: (entryPath) =>
+				matchesSkillSpec(entryPath, manifestSkills)
+					? []
+					: [
+							issue({
+								code: 'skills-path-outside-layout',
+								severity: 'error',
+								message: `Skill \`${entry.name}\` path falls outside the manifest-declared skills layout.`,
+								path: entryPath
+							})
+						]
+		})
+	);
+
+	return [
+		...duplicateNameIssues,
+		...duplicatePathIssues,
+		...ambiguousLayoutIssues,
+		...invalidPathIssues,
+		...outsideLayoutIssues
+	];
 };
 
 /**
@@ -323,90 +373,110 @@ const validateSkillEntries = (definition: PluginDefinition | LoadedPlugin): Read
 export const lint = (
 	definition: PluginDefinition | LoadedPlugin
 ): PluginLintReport => {
-	const issues: Array<PluginIssue> = [
+	const inlineHooks = inlineHooksFromManifest(definition);
+	const inlineMcp = inlineMcpFromManifest(definition);
+	const hookSpecs = Option.fromNullishOr(definition.manifest.hooks);
+	const mcpSpecs = Option.fromNullishOr(definition.manifest.mcpServers);
+	const channels = Option.getOrElse(
+		Option.fromNullishOr(definition.manifest.channels),
+		() => []
+	);
+	const servers = Option.match(definition.mcpConfig, {
+		onNone: (): ReadonlyArray<string> => [],
+		onSome: (config) => Object.keys(config.mcpServers)
+	});
+
+	const inlineHookIssues =
+		Option.isSome(inlineHooks) && Option.isSome(definition.hooksConfig) &&
+		!hooksEquivalence(inlineHooks.value, definition.hooksConfig.value)
+			? [
+					issue({
+						code: 'inline-hooks-mismatch',
+						severity: 'error',
+						message:
+							'manifest.hooks inline config does not match hooksConfig.'
+					})
+				]
+			: [];
+
+	const inlineMcpIssues =
+		Option.isSome(inlineMcp) && Option.isSome(definition.mcpConfig) &&
+		!mcpEquivalence(inlineMcp.value, definition.mcpConfig.value)
+			? [
+					issue({
+						code: 'inline-mcp-mismatch',
+						severity: 'error',
+						message:
+							'manifest.mcpServers inline config does not match mcpConfig.'
+					})
+				]
+			: [];
+
+	const hookCollapseIssues = Option.match(hookSpecs, {
+		onNone: () => [],
+		onSome: (spec) =>
+			Array.isArray(spec) && spec.length > 1
+				? [
+						issue({
+							code: 'hooks-layout-collapses-on-sync',
+							severity: 'warning',
+							message:
+								'Multiple hook config files are mergeable for load, but Plugin.sync will collapse them to one JSON file for writing.'
+						})
+					]
+				: []
+	});
+
+	const mcpCollapseIssues = Option.match(mcpSpecs, {
+		onNone: () => [],
+		onSome: (spec) =>
+			Array.isArray(spec) && spec.length > 1
+				? [
+						issue({
+							code: 'mcp-layout-collapses-on-sync',
+							severity: 'warning',
+							message:
+								'Multiple MCP config files are mergeable for load, but Plugin.sync will collapse them to one JSON file for writing.'
+						})
+					]
+				: []
+	});
+
+	const channelIssues = Arr.flatMap(channels, (channel) =>
+		Arr.contains(servers, channel.server)
+			? []
+			: [
+					issue({
+						code: 'channel-missing-server',
+						severity: 'error',
+						message: `Channel server \`${channel.server}\` is not present in mcpConfig.`
+					})
+				]
+	);
+
+	return splitIssues([
 		...validateFlatEntries({
 			kind: 'command',
-			manifestField: definition.manifest.commands,
+			manifestField: Option.fromNullishOr(definition.manifest.commands),
 			entries: definition.commands
 		}),
 		...validateFlatEntries({
 			kind: 'agent',
-			manifestField: definition.manifest.agents,
+			manifestField: Option.fromNullishOr(definition.manifest.agents),
 			entries: definition.agents
 		}),
 		...validateSkillEntries(definition),
 		...validateFlatEntries({
 			kind: 'outputStyle',
-			manifestField: definition.manifest.outputStyles,
+			manifestField: Option.fromNullishOr(definition.manifest.outputStyles),
 			entries: definition.outputStyles
-		})
-	];
-
-	const inlineHooks = inlineHooksFromManifest(definition);
-	if (Option.isSome(inlineHooks) && Option.isSome(definition.hooksConfig)) {
-		if (!hooksEquivalence(inlineHooks.value, definition.hooksConfig.value)) {
-			issues.push(
-				issue({
-					code: 'inline-hooks-mismatch',
-					severity: 'error',
-					message: 'manifest.hooks inline config does not match hooksConfig.'
-				})
-			);
-		}
-	}
-
-	const inlineMcp = inlineMcpFromManifest(definition);
-	if (Option.isSome(inlineMcp) && Option.isSome(definition.mcpConfig)) {
-		if (!mcpEquivalence(inlineMcp.value, definition.mcpConfig.value)) {
-			issues.push(
-				issue({
-					code: 'inline-mcp-mismatch',
-					severity: 'error',
-					message: 'manifest.mcpServers inline config does not match mcpConfig.'
-				})
-			);
-		}
-	}
-
-	if (Array.isArray(definition.manifest.hooks) && definition.manifest.hooks.length > 1) {
-		issues.push(
-			issue({
-				code: 'hooks-layout-collapses-on-sync',
-				severity: 'warning',
-				message: 'Multiple hook config files are mergeable for load, but Plugin.sync will collapse them to one JSON file for writing.'
-			})
-		);
-	}
-
-	if (
-		Array.isArray(definition.manifest.mcpServers) &&
-		definition.manifest.mcpServers.length > 1
-	) {
-		issues.push(
-			issue({
-				code: 'mcp-layout-collapses-on-sync',
-				severity: 'warning',
-				message: 'Multiple MCP config files are mergeable for load, but Plugin.sync will collapse them to one JSON file for writing.'
-			})
-		);
-	}
-
-	const servers = Option.isSome(definition.mcpConfig)
-		? new Set(Object.keys(definition.mcpConfig.value.mcpServers))
-		: new Set<string>();
-	for (const channel of definition.manifest.channels ?? []) {
-		if (!servers.has(channel.server)) {
-			issues.push(
-				issue({
-					code: 'channel-missing-server',
-					severity: 'error',
-					message: `Channel server \`${channel.server}\` is not present in mcpConfig.`
-				})
-			);
-		}
-	}
-
-	return splitIssues(issues);
+		}),
+		...inlineHookIssues,
+		...inlineMcpIssues,
+		...hookCollapseIssues,
+		...mcpCollapseIssues,
+		...channelIssues
+	]);
 };
 
 /**

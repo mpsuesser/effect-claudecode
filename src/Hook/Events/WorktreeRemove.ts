@@ -27,7 +27,8 @@ export class Output extends Schema.Class<Output>('WorktreeRemoveOutput')({
 	continue: Schema.optional(Schema.Boolean),
 	stopReason: Schema.optional(Schema.String),
 	suppressOutput: Schema.optional(Schema.Boolean),
-	systemMessage: Schema.optional(Schema.String)
+	systemMessage: Schema.optional(Schema.String),
+	terminalSequence: Schema.optional(Schema.String),
 }) {}
 
 export const passthrough = (): Output =>

@@ -29,7 +29,10 @@ export {
 
 export { HookContext, HookContext as Context } from './Hook/Context.ts';
 export {
+	agentId,
+	agentType,
 	cwd,
+	effort,
 	hookEventName,
 	permissionMode,
 	sessionId,
@@ -72,14 +75,18 @@ export * as Tool from './Hook/Tool.ts';
 
 export {
 	// Tier 1
+	MessageDisplay,
 	Notification,
+	PostToolBatch,
 	PostToolUse,
 	PreCompact,
 	PreToolUse,
 	SessionEnd,
 	SessionStart,
+	Setup,
 	Stop,
 	SubagentStop,
+	UserPromptExpansion,
 	UserPromptSubmit,
 	// Tier 2
 	ConfigChange,
